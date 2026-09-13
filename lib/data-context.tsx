@@ -94,24 +94,30 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
 
-  // Auth & Session state listener
+  // Auth & Session listener with safe try-catch
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-    });
+    try {
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        setSession(session);
+        setUser(session?.user ?? null);
+      }).catch(() => {
+        // Safe catch
+      });
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-    });
+      const {
+        data: { subscription },
+      } = supabase.auth.onAuthStateChange((_event, session) => {
+        setSession(session);
+        setUser(session?.user ?? null);
+      });
 
-    return () => subscription.unsubscribe();
+      return () => subscription?.unsubscribe();
+    } catch (e) {
+      // Safe catch
+    }
   }, []);
 
-  // Fetch Live Data from Supabase
+  // Fetch Live Data from Supabase with safe try-catch
   useEffect(() => {
     async function loadLiveBackendData() {
       try {
@@ -200,7 +206,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
           );
         }
       } catch (err) {
-        // Fallback to empty clean states if database table is not pre-populated
+        // Fallback gracefully
       }
     }
 
@@ -412,7 +418,11 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signOut = async () => {
-    await supabase.auth.signOut();
+    try {
+      await supabase.auth.signOut();
+    } catch (e) {
+      // Ignored
+    }
     setUser(null);
     setSession(null);
     showToast('Signed out successfully', 'info');
@@ -423,7 +433,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     setMembers([]);
     setContributions([]);
     setExpenses([]);
-    showToast('Reset data to clean production state', 'info');
+    showToast('Reset data to clean state', 'info');
   };
 
   return (
