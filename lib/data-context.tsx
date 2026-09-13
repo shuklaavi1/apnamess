@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import {
   MessGroup,
   MessMember,
@@ -10,17 +10,12 @@ import {
   FinancialSummary,
   MemberRole,
 } from './types';
-import {
-  MOCK_MESS_GROUP,
-  MOCK_MEMBERS,
-  MOCK_MONTHS,
-  MOCK_CONTRIBUTIONS,
-  MOCK_EXPENSES,
-} from './mock-data';
 import { calculateMonthFinancials } from './calculations/financials';
 import { createClient } from './supabase/client';
 import { useRouter } from 'next/navigation';
 import { User, Session } from '@supabase/supabase-js';
+
+const DEFAULT_HOUSEHOLD_NAMES = ['Avi', 'Sanjeev', 'Tapas', 'Om', 'Rahul', 'Abhay', 'Manish', 'Shahzada'];
 
 interface ToastState {
   id: string;
@@ -31,7 +26,7 @@ interface ToastState {
 interface DataContextType {
   user: User | null;
   session: Session | null;
-  messGroup: MessGroup;
+  messGroup: MessGroup | null;
   members: MessMember[];
   months: AccountingMonth[];
   selectedMonth: AccountingMonth;
@@ -49,11 +44,11 @@ interface DataContextType {
   setSelectedMonthId: (monthId: string) => void;
   setCurrentMemberId: (memberId: string) => void;
 
-  addExpense: (expense: Omit<Expense, 'id' | 'created_at' | 'mess_id' | 'month_id'> & { month_id?: string }) => void;
-  deleteExpense: (id: string) => void;
+  addExpense: (expense: Omit<Expense, 'id' | 'created_at' | 'mess_id' | 'month_id'> & { month_id?: string }) => Promise<void>;
+  deleteExpense: (id: string) => Promise<void>;
 
-  addContribution: (contribution: Omit<Contribution, 'id' | 'created_at' | 'mess_id' | 'month_id'> & { month_id?: string }) => void;
-  deleteContribution: (id: string) => void;
+  addContribution: (contribution: Omit<Contribution, 'id' | 'created_at' | 'mess_id' | 'month_id'> & { month_id?: string }) => Promise<void>;
+  deleteContribution: (id: string) => Promise<void>;
 
   addMember: (displayName: string, role?: MemberRole, monthlyContribution?: number) => Promise<void>;
   removeMember: (memberId: string) => Promise<void>;
@@ -69,12 +64,12 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
 
-  const [messGroup, setMessGroup] = useState<MessGroup>(MOCK_MESS_GROUP);
-  const [members, setMembers] = useState<MessMember[]>(MOCK_MEMBERS);
-  const [months, setMonths] = useState<AccountingMonth[]>(MOCK_MONTHS);
-  const [selectedMonthId, setSelectedMonthId] = useState<string>('month-2026-09');
-  const [contributions, setContributions] = useState<Contribution[]>(MOCK_CONTRIBUTIONS);
-  const [expenses, setExpenses] = useState<Expense[]>(MOCK_EXPENSES);
+  const [messGroup, setMessGroup] = useState<MessGroup | null>(null);
+  const [members, setMembers] = useState<MessMember[]>([]);
+  const [months, setMonths] = useState<AccountingMonth[]>([]);
+  const [selectedMonthId, setSelectedMonthId] = useState<string>('');
+  const [contributions, setContributions] = useState<Contribution[]>([]);
+  const [expenses, setExpenses] = useState<Expense[]>([]);
   const [currentMemberId, setCurrentMemberId] = useState<string>('');
 
   const [toasts, setToasts] = useState<ToastState[]>([]);
@@ -82,211 +77,267 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const supabase = createClient();
   const router = useRouter();
 
-  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
+  const showToast = useCallback((message: string, type: 'success' | 'error' | 'info' = 'success') => {
     const id = Math.random().toString(36).substring(2, 9);
     setToasts((prev) => [...prev, { id, message, type }]);
     setTimeout(() => {
       removeToast(id);
     }, 4000);
-  };
+  }, []);
 
   const removeToast = (id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
 
-  // Auth & Session listener with safe try-catch
+  // Auth & Session listener
   useEffect(() => {
-    try {
-      supabase.auth.getSession().then(({ data: { session } }) => {
-        setSession(session);
-        setUser(session?.user ?? null);
-      }).catch(() => {
-        // Safe catch
-      });
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      setUser(session?.user ?? null);
+    }).catch((err) => {
+      console.error('Session check error:', err);
+    });
 
-      const {
-        data: { subscription },
-      } = supabase.auth.onAuthStateChange((_event, session) => {
-        setSession(session);
-        setUser(session?.user ?? null);
-      });
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+      setUser(session?.user ?? null);
+    });
 
-      return () => subscription?.unsubscribe();
-    } catch (e) {
-      // Safe catch
-    }
+    return () => subscription?.unsubscribe();
   }, []);
 
-  // Fetch Live Data from Supabase with safe try-catch & local cache persistence
-  useEffect(() => {
-    async function loadLiveBackendData() {
-      try {
-        const { data: dbGroup } = await supabase.from('mess_groups').select('*').limit(1).single();
-        if (dbGroup) {
-          setMessGroup({
-            id: dbGroup.id,
-            name: dbGroup.name || 'ApnaMess',
-            currency: dbGroup.currency || 'INR',
-            timezone: dbGroup.timezone || 'Asia/Kolkata',
-            default_monthly_contribution: Number(dbGroup.default_monthly_contribution || 3000),
-            low_balance_threshold: Number(dbGroup.low_balance_threshold || 1000),
-            created_at: dbGroup.created_at,
-            updated_at: dbGroup.updated_at,
-          });
+  // Fetch Live Data from Supabase & Bootstrap Mess / Members
+  const loadLiveBackendData = useCallback(async () => {
+    try {
+      // 1. Get or create primary Mess Group
+      let { data: dbGroups, error: gErr } = await supabase
+        .from('mess_groups')
+        .select('*')
+        .order('created_at', { ascending: true });
+
+      let group = dbGroups && dbGroups.length > 0 ? dbGroups[0] : null;
+
+      if (!group) {
+        const { data: newGroup, error: createErr } = await supabase
+          .from('mess_groups')
+          .insert([
+            {
+              name: 'ApnaMess',
+              currency: 'INR',
+              timezone: 'Asia/Kolkata',
+              default_monthly_contribution: 3000,
+              low_balance_threshold: 1000,
+            },
+          ])
+          .select('*')
+          .single();
+
+        if (newGroup) {
+          group = newGroup;
+        } else {
+          // Fallback refetch if select single failed
+          const { data: retryGroups } = await supabase.from('mess_groups').select('*').order('created_at', { ascending: true });
+          group = retryGroups && retryGroups.length > 0 ? retryGroups[0] : null;
         }
-
-        const { data: dbMembers } = await supabase.from('mess_members').select('*');
-        let fetchedMembers: MessMember[] = dbMembers && dbMembers.length > 0
-          ? dbMembers.map((m: any) => ({
-              id: m.id,
-              mess_id: m.mess_id,
-              display_name: m.display_name,
-              role: m.role || 'member',
-              monthly_contribution: Number(m.monthly_contribution || 3000),
-              is_active: m.is_active ?? true,
-              joined_at: m.joined_at || m.created_at,
-              created_at: m.created_at,
-              updated_at: m.updated_at,
-              user_id: m.user_id,
-            }))
-          : [];
-
-        // Ensure all default household test members exist in fetchedMembers
-        MOCK_MEMBERS.forEach((mockM) => {
-          if (!fetchedMembers.some((fm) => fm.display_name.toLowerCase() === mockM.display_name.toLowerCase())) {
-            fetchedMembers.push(mockM);
-          }
-        });
-
-        setMembers(fetchedMembers);
-
-        const { data: dbMonths } = await supabase.from('months').select('*');
-        if (dbMonths && dbMonths.length > 0) {
-          setMonths(
-            dbMonths.map((m: any) => ({
-              id: m.id,
-              mess_id: m.mess_id,
-              year: m.year,
-              month_number: m.month_number,
-              name: m.name,
-              expected_contribution: Number(m.expected_contribution || 3000),
-              opening_balance: Number(m.opening_balance || 0),
-              status: m.status || 'open',
-              closed_at: m.closed_at,
-              created_at: m.created_at,
-              updated_at: m.updated_at,
-            }))
-          );
-          setSelectedMonthId(dbMonths[0].id);
-        }
-
-        // Load local cache persistence for shared contributions
-        let cachedContribs: Contribution[] = [];
-        try {
-          const raw = localStorage.getItem('apnamess_shared_contributions');
-          if (raw) cachedContribs = JSON.parse(raw);
-        } catch (e) {}
-
-        const { data: dbContribs } = await supabase.from('contributions').select('*');
-        let loadedContribs: Contribution[] = [];
-
-        if (dbContribs && dbContribs.length > 0) {
-          loadedContribs = dbContribs.map((c: any) => {
-            const payer = fetchedMembers.find((m) => m.id === c.member_id);
-            return {
-              id: c.id,
-              mess_id: c.mess_id,
-              month_id: c.month_id,
-              member_id: c.member_id,
-              amount: Number(c.amount),
-              payment_date: c.payment_date,
-              payment_method: c.payment_method,
-              note: c.note,
-              created_at: c.created_at,
-              member_name: payer?.display_name || c.member_name || 'Member',
-            };
-          });
-        }
-
-        // Merge DB contribs & cached contribs
-        cachedContribs.forEach((cc) => {
-          if (!loadedContribs.some((lc) => lc.id === cc.id)) {
-            loadedContribs.push(cc);
-          }
-        });
-
-        setContributions(loadedContribs);
-
-        // Load local cache persistence for shared expenses
-        let cachedExpenses: Expense[] = [];
-        try {
-          const raw = localStorage.getItem('apnamess_shared_expenses');
-          if (raw) cachedExpenses = JSON.parse(raw);
-        } catch (e) {}
-
-        const { data: dbExpenses } = await supabase.from('expenses').select('*');
-        let loadedExpenses: Expense[] = [];
-
-        if (dbExpenses && dbExpenses.length > 0) {
-          loadedExpenses = dbExpenses.map((e: any) => {
-            const payer = fetchedMembers.find((m) => m.id === e.paid_by_member_id);
-            return {
-              id: e.id,
-              mess_id: e.mess_id,
-              month_id: e.month_id,
-              item_name: e.item_name,
-              amount: Number(e.amount),
-              expense_date: e.expense_date,
-              paid_by_member_id: e.paid_by_member_id,
-              payment_source: e.payment_source || 'common_fund',
-              created_at: e.created_at,
-              member_name: payer?.display_name || e.member_name || 'Member',
-            };
-          });
-        }
-
-        cachedExpenses.forEach((ce) => {
-          if (!loadedExpenses.some((le) => le.id === ce.id)) {
-            loadedExpenses.push(ce);
-          }
-        });
-
-        setExpenses(loadedExpenses);
-      } catch (err) {
-        // Fallback gracefully
       }
-    }
 
+      if (!group) {
+        if (gErr) console.error('Error fetching mess_groups:', gErr);
+        return;
+      }
+
+      setMessGroup({
+        id: group.id,
+        name: group.name || 'ApnaMess',
+        currency: group.currency || 'INR',
+        timezone: group.timezone || 'Asia/Kolkata',
+        default_monthly_contribution: Number(group.default_monthly_contribution || 3000),
+        low_balance_threshold: Number(group.low_balance_threshold || 1000),
+        created_at: group.created_at,
+        updated_at: group.updated_at,
+      });
+
+      // 2. Fetch or create Months for this mess
+      let { data: dbMonths } = await supabase.from('months').select('*').eq('mess_id', group.id);
+
+      if (!dbMonths || dbMonths.length === 0) {
+        await supabase.from('months').insert([
+          {
+            mess_id: group.id,
+            year: 2026,
+            month_number: 9,
+            name: 'September',
+            expected_contribution: 3000,
+            opening_balance: 0,
+            status: 'open',
+          },
+        ]);
+
+        const { data: refetchedMonths } = await supabase.from('months').select('*').eq('mess_id', group.id);
+        dbMonths = refetchedMonths || [];
+      }
+
+      const parsedMonths: AccountingMonth[] = (dbMonths || []).map((m: any) => ({
+        id: m.id,
+        mess_id: m.mess_id,
+        year: m.year,
+        month_number: m.month_number,
+        name: m.name,
+        expected_contribution: Number(m.expected_contribution || 3000),
+        opening_balance: Number(m.opening_balance || 0),
+        status: m.status || 'open',
+        closed_at: m.closed_at,
+        created_at: m.created_at,
+        updated_at: m.updated_at,
+      }));
+
+      setMonths(parsedMonths);
+      if (parsedMonths.length > 0 && (!selectedMonthId || !parsedMonths.some((m) => m.id === selectedMonthId))) {
+        setSelectedMonthId(parsedMonths[0].id);
+      }
+
+      // 3. Fetch & Bootstrap Mess Members
+      let { data: dbMembers } = await supabase.from('mess_members').select('*').eq('mess_id', group.id);
+
+      // Ensure all 8 default household members exist in DB
+      const existingNames = new Set((dbMembers || []).map((m: any) => (m.display_name || '').toLowerCase()));
+      const missingNames = DEFAULT_HOUSEHOLD_NAMES.filter((name) => !existingNames.has(name.toLowerCase()));
+
+      if (missingNames.length > 0) {
+        const toInsert = missingNames.map((name) => ({
+          mess_id: group.id,
+          display_name: name,
+          role: name.toLowerCase() === 'avi' ? 'admin' : 'member',
+          monthly_contribution: 3000,
+          is_active: true,
+        }));
+
+        await supabase.from('mess_members').insert(toInsert);
+        const { data: refetchedMembers } = await supabase.from('mess_members').select('*').eq('mess_id', group.id);
+        dbMembers = refetchedMembers || dbMembers || [];
+      }
+
+      // 4. Link authenticated user to matching mess member if not linked yet
+      if (user && dbMembers) {
+        const userDisplayName = user.user_metadata?.full_name || user.email?.split('@')[0];
+        const linkedMember = dbMembers.find((m: any) => m.user_id === user.id);
+
+        if (!linkedMember && userDisplayName) {
+          const matchByName = dbMembers.find((m: any) => (m.display_name || '').toLowerCase() === userDisplayName.toLowerCase());
+          if (matchByName) {
+            await supabase.from('mess_members').update({ user_id: user.id }).eq('id', matchByName.id);
+            matchByName.user_id = user.id;
+          } else {
+            const { data: newMem } = await supabase
+              .from('mess_members')
+              .insert([
+                {
+                  mess_id: group.id,
+                  user_id: user.id,
+                  display_name: userDisplayName,
+                  role: 'member',
+                  monthly_contribution: 3000,
+                  is_active: true,
+                },
+              ])
+              .select('*')
+              .single();
+            if (newMem) {
+              dbMembers.push(newMem);
+            }
+          }
+        }
+      }
+
+      const parsedMembers: MessMember[] = (dbMembers || []).map((m: any) => ({
+        id: m.id,
+        mess_id: m.mess_id,
+        display_name: m.display_name,
+        role: m.role || 'member',
+        monthly_contribution: Number(m.monthly_contribution || 3000),
+        is_active: m.is_active ?? true,
+        joined_at: m.joined_at || m.created_at,
+        created_at: m.created_at,
+        updated_at: m.updated_at,
+        user_id: m.user_id,
+      }));
+
+      setMembers(parsedMembers);
+
+      // 5. Fetch Contributions
+      const { data: dbContribs, error: cErr } = await supabase.from('contributions').select('*').eq('mess_id', group.id);
+      if (cErr) {
+        console.error('Error fetching contributions:', cErr);
+      }
+
+      const parsedContribs: Contribution[] = (dbContribs || []).map((c: any) => {
+        const payer = parsedMembers.find((m) => m.id === c.member_id);
+        return {
+          id: c.id,
+          mess_id: c.mess_id,
+          month_id: c.month_id,
+          member_id: c.member_id,
+          amount: Number(c.amount),
+          payment_date: c.payment_date,
+          payment_method: c.payment_method,
+          note: c.note,
+          created_at: c.created_at,
+          member_name: payer?.display_name || 'Member',
+        };
+      });
+
+      setContributions(parsedContribs);
+
+      // 6. Fetch Expenses
+      const { data: dbExpenses, error: eErr } = await supabase.from('expenses').select('*').eq('mess_id', group.id);
+      if (eErr) {
+        console.error('Error fetching expenses:', eErr);
+      }
+
+      const parsedExpenses: Expense[] = (dbExpenses || []).map((e: any) => {
+        const payer = parsedMembers.find((m) => m.id === e.paid_by_member_id);
+        return {
+          id: e.id,
+          mess_id: e.mess_id,
+          month_id: e.month_id,
+          item_name: e.item_name,
+          amount: Number(e.amount),
+          expense_date: e.expense_date,
+          paid_by_member_id: e.paid_by_member_id,
+          payment_source: e.payment_source || 'common_fund',
+          created_at: e.created_at,
+          member_name: payer?.display_name || 'Member',
+        };
+      });
+
+      setExpenses(parsedExpenses);
+    } catch (err: any) {
+      console.error('Data loading error:', err);
+    }
+  }, [supabase, user, selectedMonthId]);
+
+  useEffect(() => {
     loadLiveBackendData();
 
-    // 1. Listen for storage events across tabs/windows for instant sync
-    const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === 'apnamess_shared_contributions' || e.key === 'apnamess_shared_expenses') {
-        loadLiveBackendData();
-      }
-    };
-
-    // 2. Refresh live data on window focus and visibility change
     const handleFocus = () => {
       loadLiveBackendData();
     };
 
-    // 3. Periodic polling every 3 seconds for active sync
     const interval = setInterval(() => {
       loadLiveBackendData();
-    }, 3000);
+    }, 4000);
 
-    window.addEventListener('storage', handleStorageChange);
     window.addEventListener('focus', handleFocus);
     window.addEventListener('visibilitychange', handleFocus);
 
     return () => {
       clearInterval(interval);
-      window.removeEventListener('storage', handleStorageChange);
       window.removeEventListener('focus', handleFocus);
       window.removeEventListener('visibilitychange', handleFocus);
     };
-  }, [user]);
+  }, [loadLiveBackendData]);
 
   // Sync currentMemberId when user or members change
   useEffect(() => {
@@ -294,7 +345,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       if (user) {
         const userDisplayName = user.user_metadata?.full_name || user.email?.split('@')[0];
         const match = members.find(
-          (m: any) => m.user_id === user.id || m.display_name.toLowerCase() === userDisplayName?.toLowerCase()
+          (m) => m.user_id === user.id || (userDisplayName && m.display_name.toLowerCase() === userDisplayName.toLowerCase())
         );
         if (match) {
           setCurrentMemberId(match.id);
@@ -305,12 +356,24 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         setCurrentMemberId(members[0].id);
       }
     }
-  }, [user, members]);
+  }, [user, members, currentMemberId]);
 
   const activeMembers = members.filter((m) => m.is_active);
+
+  const fallbackGroup: MessGroup = messGroup || {
+    id: 'placeholder',
+    name: 'ApnaMess',
+    currency: 'INR',
+    timezone: 'Asia/Kolkata',
+    default_monthly_contribution: 3000,
+    low_balance_threshold: 1000,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+
   const currentMember = activeMembers.find((m) => m.id === currentMemberId) || activeMembers[0] || {
     id: user?.id ? `mem-${user.id.substring(0, 8)}` : 'guest',
-    mess_id: messGroup.id,
+    mess_id: fallbackGroup.id,
     display_name: user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Member',
     role: 'member',
     monthly_contribution: 3000,
@@ -323,7 +386,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
 
   const selectedMonth = months.find((m) => m.id === selectedMonthId) || months[0] || {
     id: 'month-2026-09',
-    mess_id: messGroup.id,
+    mess_id: fallbackGroup.id,
     year: 2026,
     month_number: 9,
     name: 'September',
@@ -342,172 +405,140 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   );
 
   const addExpense = async (data: Omit<Expense, 'id' | 'created_at' | 'mess_id' | 'month_id'> & { month_id?: string }) => {
+    if (!messGroup?.id) {
+      showToast('Mess group not initialized', 'error');
+      return;
+    }
+
     const targetMonthId = data.month_id || selectedMonth.id;
     const payer = members.find((m) => m.id === data.paid_by_member_id);
 
-    const newExpense: Expense = {
-      id: `exp-${Date.now()}`,
-      mess_id: messGroup.id,
-      month_id: targetMonthId,
-      item_name: data.item_name,
-      amount: Number(data.amount),
-      expense_date: data.expense_date,
-      paid_by_member_id: data.paid_by_member_id,
-      payment_source: data.payment_source,
-      note: data.note,
-      created_at: new Date().toISOString(),
-      member_name: payer?.display_name || 'Member',
-    };
-
-    setExpenses((prev) => {
-      const updated = [newExpense, ...prev];
-      try {
-        localStorage.setItem('apnamess_shared_expenses', JSON.stringify(updated));
-      } catch (e) {}
-      return updated;
-    });
-
-    try {
-      await supabase.from('expenses').insert([{
+    const { error } = await supabase.from('expenses').insert([
+      {
         mess_id: messGroup.id,
         month_id: targetMonthId,
         item_name: data.item_name,
         amount: Number(data.amount),
         expense_date: data.expense_date,
         paid_by_member_id: data.paid_by_member_id,
-        payment_source: data.payment_source,
-        note: data.note,
-      }]);
-    } catch (e) {
-      // Ignored
+        payment_source: data.payment_source || 'common_fund',
+        note: data.note || null,
+      },
+    ]);
+
+    if (error) {
+      console.error('Failed to add expense:', error);
+      showToast(`Failed to save expense: ${error.message}`, 'error');
+      return;
     }
 
-    showToast(`Added purchase ₹${newExpense.amount} for ${newExpense.item_name}`);
+    showToast(`Added purchase ₹${data.amount} for ${data.item_name}`);
+    await loadLiveBackendData();
   };
 
   const deleteExpense = async (id: string) => {
     const existing = expenses.find((e) => e.id === id);
     if (!existing) return;
 
-    setExpenses((prev) => {
-      const updated = prev.filter((e) => e.id !== id);
-      try {
-        localStorage.setItem('apnamess_shared_expenses', JSON.stringify(updated));
-      } catch (e) {}
-      return updated;
-    });
+    const { error } = await supabase.from('expenses').delete().eq('id', id);
 
-    try {
-      await supabase.from('expenses').delete().eq('id', id);
-    } catch (e) {
-      // Ignored
+    if (error) {
+      console.error('Failed to delete expense:', error);
+      showToast(`Failed to delete expense: ${error.message}`, 'error');
+      return;
     }
 
     showToast(`Deleted expense "${existing.item_name}"`, 'info');
+    await loadLiveBackendData();
   };
 
   const addContribution = async (data: Omit<Contribution, 'id' | 'created_at' | 'mess_id' | 'month_id'> & { month_id?: string }) => {
+    if (!messGroup?.id) {
+      showToast('Mess group not initialized', 'error');
+      return;
+    }
+
     const targetMonthId = data.month_id || selectedMonth.id;
     const payer = members.find((m) => m.id === data.member_id);
 
-    const newContrib: Contribution = {
-      id: `contrib-${Date.now()}`,
-      mess_id: messGroup.id,
-      month_id: targetMonthId,
-      member_id: data.member_id,
-      amount: Number(data.amount),
-      payment_date: data.payment_date,
-      payment_method: data.payment_method || 'UPI',
-      note: data.note,
-      created_at: new Date().toISOString(),
-      member_name: payer?.display_name || 'Member',
-    };
-
-    setContributions((prev) => {
-      const updated = [newContrib, ...prev];
-      try {
-        localStorage.setItem('apnamess_shared_contributions', JSON.stringify(updated));
-      } catch (e) {}
-      return updated;
-    });
-
-    try {
-      await supabase.from('contributions').insert([{
+    const { error } = await supabase.from('contributions').insert([
+      {
         mess_id: messGroup.id,
         month_id: targetMonthId,
         member_id: data.member_id,
         amount: Number(data.amount),
         payment_date: data.payment_date,
         payment_method: data.payment_method || 'UPI',
-        note: data.note,
-      }]);
-    } catch (e) {
-      // Ignored
+        note: data.note || null,
+      },
+    ]);
+
+    if (error) {
+      console.error('Failed to add contribution:', error);
+      showToast(`Failed to save contribution: ${error.message}`, 'error');
+      return;
     }
 
-    showToast(`Recorded contribution ₹${newContrib.amount} from ${newContrib.member_name}`);
+    showToast(`Recorded contribution ₹${data.amount} from ${payer?.display_name || 'Member'}`);
+    await loadLiveBackendData();
   };
 
   const deleteContribution = async (id: string) => {
     const existing = contributions.find((c) => c.id === id);
     if (!existing) return;
 
-    setContributions((prev) => prev.filter((c) => c.id !== id));
+    const { error } = await supabase.from('contributions').delete().eq('id', id);
 
-    try {
-      await supabase.from('contributions').delete().eq('id', id);
-    } catch (e) {
-      // Ignored
+    if (error) {
+      console.error('Failed to delete contribution:', error);
+      showToast(`Failed to delete contribution: ${error.message}`, 'error');
+      return;
     }
 
     showToast(`Deleted contribution from ${existing.member_name}`, 'info');
+    await loadLiveBackendData();
   };
 
   const addMember = async (displayName: string, role: MemberRole = 'member', monthlyContribution = 3000) => {
-    const newMember: MessMember = {
-      id: `mem-${Date.now()}`,
-      mess_id: messGroup.id,
-      display_name: displayName,
-      role,
-      monthly_contribution: Number(monthlyContribution),
-      is_active: true,
-      joined_at: new Date().toISOString(),
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
+    if (!messGroup?.id) {
+      showToast('Mess group not initialized', 'error');
+      return;
+    }
 
-    setMembers((prev) => [...prev, newMember]);
-
-    try {
-      await supabase.from('mess_members').insert([{
+    const { error } = await supabase.from('mess_members').insert([
+      {
         mess_id: messGroup.id,
         display_name: displayName,
         role,
         monthly_contribution: Number(monthlyContribution),
         is_active: true,
-      }]);
-    } catch (e) {
-      // Local fallback
+      },
+    ]);
+
+    if (error) {
+      console.error('Failed to add member:', error);
+      showToast(`Failed to add member: ${error.message}`, 'error');
+      return;
     }
 
     showToast(`Added ${displayName} to ApnaMess`);
+    await loadLiveBackendData();
   };
 
   const removeMember = async (memberId: string) => {
     const target = members.find((m) => m.id === memberId);
     if (!target) return;
 
-    setMembers((prev) =>
-      prev.map((m) => (m.id === memberId ? { ...m, is_active: false } : m))
-    );
+    const { error } = await supabase.from('mess_members').update({ is_active: false }).eq('id', memberId);
 
-    try {
-      await supabase.from('mess_members').update({ is_active: false }).eq('id', memberId);
-    } catch (e) {
-      // Local fallback
+    if (error) {
+      console.error('Failed to remove member:', error);
+      showToast(`Failed to remove member: ${error.message}`, 'error');
+      return;
     }
 
     showToast(`Removed ${target.display_name}`, 'info');
+    await loadLiveBackendData();
   };
 
   const toggleAdminRole = async (memberId: string) => {
@@ -516,24 +547,23 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
 
     const newRole: MemberRole = target.role === 'admin' ? 'member' : 'admin';
 
-    setMembers((prev) =>
-      prev.map((m) => (m.id === memberId ? { ...m, role: newRole } : m))
-    );
+    const { error } = await supabase.from('mess_members').update({ role: newRole }).eq('id', memberId);
 
-    try {
-      await supabase.from('mess_members').update({ role: newRole }).eq('id', memberId);
-    } catch (e) {
-      // Local fallback
+    if (error) {
+      console.error('Failed to update role:', error);
+      showToast(`Failed to update role: ${error.message}`, 'error');
+      return;
     }
 
     showToast(`Updated ${target.display_name} role to ${newRole.toUpperCase()}`);
+    await loadLiveBackendData();
   };
 
   const signOut = async () => {
     try {
       await supabase.auth.signOut();
     } catch (e) {
-      // Ignored
+      console.error('Sign out error:', e);
     }
     setUser(null);
     setSession(null);
@@ -541,10 +571,12 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     router.push('/login');
   };
 
-  const resetToDemoData = () => {
-    setMembers([]);
-    setContributions([]);
-    setExpenses([]);
+  const resetToDemoData = async () => {
+    if (messGroup?.id) {
+      await supabase.from('contributions').delete().eq('mess_id', messGroup.id);
+      await supabase.from('expenses').delete().eq('mess_id', messGroup.id);
+      await loadLiveBackendData();
+    }
     showToast('Reset data to clean state', 'info');
   };
 
@@ -553,7 +585,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       value={{
         user,
         session,
-        messGroup,
+        messGroup: fallbackGroup,
         members: activeMembers,
         months,
         selectedMonth,
