@@ -26,6 +26,7 @@ interface ToastState {
 interface DataContextType {
   user: User | null;
   session: Session | null;
+  isInitializing: boolean;
   messGroup: MessGroup | null;
   members: MessMember[];
   months: AccountingMonth[];
@@ -64,6 +65,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
 
+  const [isInitializing, setIsInitializing] = useState<boolean>(true);
   const [messGroup, setMessGroup] = useState<MessGroup | null>(null);
   const [members, setMembers] = useState<MessMember[]>([]);
   const [months, setMonths] = useState<AccountingMonth[]>([]);
@@ -145,10 +147,11 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
 
       if (!group) {
         if (gErr) console.error('Error fetching mess_groups:', gErr);
+        setIsInitializing(false);
         return;
       }
 
-      setMessGroup({
+      const activeGroup: MessGroup = {
         id: group.id,
         name: group.name || 'ApnaMess',
         currency: group.currency || 'INR',
@@ -157,7 +160,9 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         low_balance_threshold: Number(group.low_balance_threshold || 1000),
         created_at: group.created_at,
         updated_at: group.updated_at,
-      });
+      };
+
+      setMessGroup(activeGroup);
 
       // 2. Fetch or create Months for this mess
       let { data: dbMonths } = await supabase.from('months').select('*').eq('mess_id', group.id);
@@ -315,6 +320,8 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       setExpenses(parsedExpenses);
     } catch (err: any) {
       console.error('Data loading error:', err);
+    } finally {
+      setIsInitializing(false);
     }
   }, [supabase, user, selectedMonthId]);
 
@@ -404,18 +411,55 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     expenses
   );
 
+  // Dynamic helper to ensure mess group ID is resolved
+  const resolveMessId = async (): Promise<string | null> => {
+    if (messGroup?.id && messGroup.id !== 'placeholder') {
+      return messGroup.id;
+    }
+
+    const { data: dbGroups } = await supabase.from('mess_groups').select('*').order('created_at', { ascending: true });
+    if (dbGroups && dbGroups.length > 0) {
+      return dbGroups[0].id;
+    }
+
+    const { data: newGroup } = await supabase
+      .from('mess_groups')
+      .insert([
+        {
+          name: 'ApnaMess',
+          currency: 'INR',
+          timezone: 'Asia/Kolkata',
+          default_monthly_contribution: 3000,
+          low_balance_threshold: 1000,
+        },
+      ])
+      .select('*')
+      .single();
+
+    return newGroup ? newGroup.id : null;
+  };
+
   const addExpense = async (data: Omit<Expense, 'id' | 'created_at' | 'mess_id' | 'month_id'> & { month_id?: string }) => {
-    if (!messGroup?.id) {
+    const targetMessId = await resolveMessId();
+
+    if (!targetMessId) {
       showToast('Mess group not initialized', 'error');
       return;
     }
 
-    const targetMonthId = data.month_id || selectedMonth.id;
+    let targetMonthId = data.month_id || selectedMonth.id;
+    if (!targetMonthId || targetMonthId === 'month-2026-09') {
+      const { data: dbMonths } = await supabase.from('months').select('*').eq('mess_id', targetMessId);
+      if (dbMonths && dbMonths.length > 0) {
+        targetMonthId = dbMonths[0].id;
+      }
+    }
+
     const payer = members.find((m) => m.id === data.paid_by_member_id);
 
     const { error } = await supabase.from('expenses').insert([
       {
-        mess_id: messGroup.id,
+        mess_id: targetMessId,
         month_id: targetMonthId,
         item_name: data.item_name,
         amount: Number(data.amount),
@@ -453,17 +497,39 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   };
 
   const addContribution = async (data: Omit<Contribution, 'id' | 'created_at' | 'mess_id' | 'month_id'> & { month_id?: string }) => {
-    if (!messGroup?.id) {
+    const targetMessId = await resolveMessId();
+
+    if (!targetMessId) {
       showToast('Mess group not initialized', 'error');
       return;
     }
 
-    const targetMonthId = data.month_id || selectedMonth.id;
+    let targetMonthId = data.month_id || selectedMonth.id;
+    if (!targetMonthId || targetMonthId === 'month-2026-09') {
+      const { data: dbMonths } = await supabase.from('months').select('*').eq('mess_id', targetMessId);
+      if (dbMonths && dbMonths.length > 0) {
+        targetMonthId = dbMonths[0].id;
+      } else {
+        const { data: newMonth } = await supabase.from('months').insert([
+          {
+            mess_id: targetMessId,
+            year: 2026,
+            month_number: 9,
+            name: 'September',
+            expected_contribution: 3000,
+            opening_balance: 0,
+            status: 'open',
+          },
+        ]).select('*').single();
+        if (newMonth) targetMonthId = newMonth.id;
+      }
+    }
+
     const payer = members.find((m) => m.id === data.member_id);
 
     const { error } = await supabase.from('contributions').insert([
       {
-        mess_id: messGroup.id,
+        mess_id: targetMessId,
         month_id: targetMonthId,
         member_id: data.member_id,
         amount: Number(data.amount),
@@ -500,14 +566,16 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   };
 
   const addMember = async (displayName: string, role: MemberRole = 'member', monthlyContribution = 3000) => {
-    if (!messGroup?.id) {
+    const targetMessId = await resolveMessId();
+
+    if (!targetMessId) {
       showToast('Mess group not initialized', 'error');
       return;
     }
 
     const { error } = await supabase.from('mess_members').insert([
       {
-        mess_id: messGroup.id,
+        mess_id: targetMessId,
         display_name: displayName,
         role,
         monthly_contribution: Number(monthlyContribution),
@@ -572,9 +640,10 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   };
 
   const resetToDemoData = async () => {
-    if (messGroup?.id) {
-      await supabase.from('contributions').delete().eq('mess_id', messGroup.id);
-      await supabase.from('expenses').delete().eq('mess_id', messGroup.id);
+    const targetMessId = await resolveMessId();
+    if (targetMessId) {
+      await supabase.from('contributions').delete().eq('mess_id', targetMessId);
+      await supabase.from('expenses').delete().eq('mess_id', targetMessId);
       await loadLiveBackendData();
     }
     showToast('Reset data to clean state', 'info');
@@ -585,6 +654,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       value={{
         user,
         session,
+        isInitializing,
         messGroup: fallbackGroup,
         members: activeMembers,
         months,

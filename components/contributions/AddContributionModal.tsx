@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { useData } from '@/lib/data-context';
-import { X, Check } from 'lucide-react';
+import { X, Check, Loader2 } from 'lucide-react';
 
 interface AddContributionModalProps {
   isOpen: boolean;
@@ -10,11 +10,12 @@ interface AddContributionModalProps {
 }
 
 export function AddContributionModal({ isOpen, onClose }: AddContributionModalProps) {
-  const { members, currentMember, addContribution, selectedMonth } = useData();
+  const { members, currentMember, addContribution, selectedMonth, isInitializing, messGroup } = useData();
 
   const [amount, setAmount] = useState('');
   const [memberId, setMemberId] = useState('');
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   React.useEffect(() => {
     if (isOpen) {
@@ -26,8 +27,12 @@ export function AddContributionModal({ isOpen, onClose }: AddContributionModalPr
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const isFormLoading = isInitializing || !messGroup?.id || messGroup.id === 'placeholder';
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (isFormLoading || isSubmitting) return;
 
     if (!amount || Number(amount) <= 0) {
       alert('Please enter a valid amount');
@@ -36,15 +41,21 @@ export function AddContributionModal({ isOpen, onClose }: AddContributionModalPr
 
     const selectedPayerId = memberId || currentMember?.id || members[0]?.id || '';
 
-    addContribution({
-      member_id: selectedPayerId,
-      amount: Number(amount),
-      payment_date: paymentDate,
-      month_id: selectedMonth.id,
-    });
-
-    setAmount('');
-    onClose();
+    setIsSubmitting(true);
+    try {
+      await addContribution({
+        member_id: selectedPayerId,
+        amount: Number(amount),
+        payment_date: paymentDate,
+        month_id: selectedMonth.id,
+      });
+      setAmount('');
+      onClose();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const currentPayerValue = memberId || currentMember?.id || members[0]?.id || '';
@@ -73,10 +84,11 @@ export function AddContributionModal({ isOpen, onClose }: AddContributionModalPr
                 step="any"
                 inputMode="decimal"
                 required
+                disabled={isFormLoading || isSubmitting}
                 placeholder="3000"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-300 focus:border-blue-600 rounded-lg py-2.5 pl-9 pr-3 text-2xl font-black text-slate-900 focus:outline-none"
+                className="w-full bg-slate-50 border border-slate-300 focus:border-blue-600 rounded-lg py-2.5 pl-9 pr-3 text-2xl font-black text-slate-900 focus:outline-none disabled:opacity-50"
                 autoFocus
               />
             </div>
@@ -88,7 +100,8 @@ export function AddContributionModal({ isOpen, onClose }: AddContributionModalPr
             <select
               value={currentPayerValue}
               onChange={(e) => setMemberId(e.target.value)}
-              className="w-full bg-slate-50 border border-slate-300 focus:border-blue-600 rounded-lg p-2.5 text-sm text-slate-900 focus:outline-none"
+              disabled={isFormLoading || isSubmitting}
+              className="w-full bg-slate-50 border border-slate-300 focus:border-blue-600 rounded-lg p-2.5 text-sm text-slate-900 focus:outline-none disabled:opacity-50"
             >
               {members.length === 0 ? (
                 <option value={currentMember?.id || ''}>{currentMember?.display_name || 'Member'}</option>
@@ -107,18 +120,32 @@ export function AddContributionModal({ isOpen, onClose }: AddContributionModalPr
             <label className="block text-xs font-semibold text-slate-700 mb-1">Date</label>
             <input
               type="date"
+              disabled={isFormLoading || isSubmitting}
               value={paymentDate}
               onChange={(e) => setPaymentDate(e.target.value)}
-              className="w-full bg-slate-50 border border-slate-300 focus:border-blue-600 rounded-lg p-2.5 text-sm text-slate-900 focus:outline-none"
+              className="w-full bg-slate-50 border border-slate-300 focus:border-blue-600 rounded-lg p-2.5 text-sm text-slate-900 focus:outline-none disabled:opacity-50"
             />
           </div>
 
           <div className="pt-2">
             <button
               type="submit"
-              className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold shadow-sm flex items-center justify-center gap-2 transition-colors"
+              disabled={isFormLoading || isSubmitting}
+              className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold shadow-sm flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
             >
-              <Check className="w-4 h-4" /> Save Contribution
+              {isFormLoading ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" /> Initializing Mess...
+                </>
+              ) : isSubmitting ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" /> Saving Contribution...
+                </>
+              ) : (
+                <>
+                  <Check className="w-4 h-4" /> Save Contribution
+                </>
+              )}
             </button>
           </div>
         </form>

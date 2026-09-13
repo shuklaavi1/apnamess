@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { useData } from '@/lib/data-context';
-import { X, Check } from 'lucide-react';
+import { X, Check, Loader2 } from 'lucide-react';
 
 interface AddMonthlyContributionModalProps {
   isOpen: boolean;
@@ -10,11 +10,12 @@ interface AddMonthlyContributionModalProps {
 }
 
 export function AddMonthlyContributionModal({ isOpen, onClose }: AddMonthlyContributionModalProps) {
-  const { members, currentMember, addContribution, months, selectedMonth } = useData();
+  const { members, currentMember, addContribution, months, selectedMonth, isInitializing, messGroup } = useData();
 
   const [memberId, setMemberId] = useState('');
   const [amount, setAmount] = useState('3000');
   const [monthId, setMonthId] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   React.useEffect(() => {
     if (isOpen) {
@@ -29,8 +30,12 @@ export function AddMonthlyContributionModal({ isOpen, onClose }: AddMonthlyContr
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const isFormLoading = isInitializing || !messGroup?.id || messGroup.id === 'placeholder';
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (isFormLoading || isSubmitting) return;
 
     if (!amount || Number(amount) <= 0) {
       alert('Please enter a valid amount');
@@ -40,14 +45,20 @@ export function AddMonthlyContributionModal({ isOpen, onClose }: AddMonthlyContr
     const selectedPayerId = memberId || currentMember?.id || members[0]?.id || '';
     const selectedTargetMonthId = monthId || selectedMonth?.id || '';
 
-    addContribution({
-      member_id: selectedPayerId,
-      amount: Number(amount),
-      payment_date: new Date().toISOString().split('T')[0],
-      month_id: selectedTargetMonthId,
-    });
-
-    onClose();
+    setIsSubmitting(true);
+    try {
+      await addContribution({
+        member_id: selectedPayerId,
+        amount: Number(amount),
+        payment_date: new Date().toISOString().split('T')[0],
+        month_id: selectedTargetMonthId,
+      });
+      onClose();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const currentPayerValue = memberId || currentMember?.id || members[0]?.id || '';
@@ -69,7 +80,8 @@ export function AddMonthlyContributionModal({ isOpen, onClose }: AddMonthlyContr
             <select
               value={currentPayerValue}
               onChange={(e) => setMemberId(e.target.value)}
-              className="w-full bg-slate-50 border border-slate-300 focus:border-slate-900 rounded-lg p-2.5 text-sm text-slate-900 focus:outline-none"
+              disabled={isFormLoading || isSubmitting}
+              className="w-full bg-slate-50 border border-slate-300 focus:border-slate-900 rounded-lg p-2.5 text-sm text-slate-900 focus:outline-none disabled:opacity-50"
             >
               {members.length === 0 ? (
                 <option value={currentMember?.id || ''}>{currentMember?.display_name || 'Member'}</option>
@@ -92,9 +104,10 @@ export function AddMonthlyContributionModal({ isOpen, onClose }: AddMonthlyContr
                 step="any"
                 inputMode="decimal"
                 required
+                disabled={isFormLoading || isSubmitting}
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-300 focus:border-slate-900 rounded-lg py-2.5 pl-8 pr-3 text-xl font-bold text-slate-900 focus:outline-none"
+                className="w-full bg-slate-50 border border-slate-300 focus:border-slate-900 rounded-lg py-2.5 pl-8 pr-3 text-xl font-bold text-slate-900 focus:outline-none disabled:opacity-50"
                 autoFocus
               />
             </div>
@@ -103,9 +116,10 @@ export function AddMonthlyContributionModal({ isOpen, onClose }: AddMonthlyContr
           <div>
             <label className="block text-xs font-semibold text-slate-700 mb-1">Month</label>
             <select
-              value={monthId}
+              value={currentMonthValue}
               onChange={(e) => setMonthId(e.target.value)}
-              className="w-full bg-slate-50 border border-slate-300 focus:border-slate-900 rounded-lg p-2.5 text-sm text-slate-900 focus:outline-none"
+              disabled={isFormLoading || isSubmitting}
+              className="w-full bg-slate-50 border border-slate-300 focus:border-slate-900 rounded-lg p-2.5 text-sm text-slate-900 focus:outline-none disabled:opacity-50"
             >
               {months.map((m) => (
                 <option key={m.id} value={m.id}>
@@ -118,9 +132,22 @@ export function AddMonthlyContributionModal({ isOpen, onClose }: AddMonthlyContr
           <div className="pt-2">
             <button
               type="submit"
-              className="w-full py-3 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-sm font-bold shadow-xs flex items-center justify-center gap-2"
+              disabled={isFormLoading || isSubmitting}
+              className="w-full py-3 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-sm font-bold shadow-xs flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
             >
-              <Check className="w-4 h-4" /> Save Monthly Contribution
+              {isFormLoading ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" /> Initializing Mess...
+                </>
+              ) : isSubmitting ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" /> Saving Contribution...
+                </>
+              ) : (
+                <>
+                  <Check className="w-4 h-4" /> Save Monthly Contribution
+                </>
+              )}
             </button>
           </div>
         </form>

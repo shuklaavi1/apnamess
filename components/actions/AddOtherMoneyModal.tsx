@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { useData } from '@/lib/data-context';
-import { X, Check } from 'lucide-react';
+import { X, Check, Loader2 } from 'lucide-react';
 
 interface AddOtherMoneyModalProps {
   isOpen: boolean;
@@ -10,44 +10,56 @@ interface AddOtherMoneyModalProps {
 }
 
 export function AddOtherMoneyModal({ isOpen, onClose }: AddOtherMoneyModalProps) {
-  const { addContribution, addExpense, currentMember, selectedMonth } = useData();
+  const { addContribution, addExpense, currentMember, selectedMonth, isInitializing, messGroup } = useData();
 
   const [type, setType] = useState<'add' | 'deduct'>('add');
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const isFormLoading = isInitializing || !messGroup?.id || messGroup.id === 'placeholder';
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (isFormLoading || isSubmitting) return;
 
     if (!amount || Number(amount) <= 0) {
       alert('Please enter a valid amount');
       return;
     }
 
-    if (type === 'add') {
-      addContribution({
-        member_id: currentMember.id,
-        amount: Number(amount),
-        payment_date: new Date().toISOString().split('T')[0],
-        note: note.trim() || 'Other Money Addition',
-        month_id: selectedMonth.id,
-      });
-    } else {
-      addExpense({
-        item_name: note.trim() || 'Other Money Deduction',
-        amount: Number(amount),
-        paid_by_member_id: currentMember.id,
-        payment_source: 'common_fund',
-        expense_date: new Date().toISOString().split('T')[0],
-        month_id: selectedMonth.id,
-      });
-    }
+    setIsSubmitting(true);
+    try {
+      if (type === 'add') {
+        await addContribution({
+          member_id: currentMember.id,
+          amount: Number(amount),
+          payment_date: new Date().toISOString().split('T')[0],
+          note: note.trim() || 'Other Money Addition',
+          month_id: selectedMonth.id,
+        });
+      } else {
+        await addExpense({
+          item_name: note.trim() || 'Other Money Deduction',
+          amount: Number(amount),
+          paid_by_member_id: currentMember.id,
+          payment_source: 'common_fund',
+          expense_date: new Date().toISOString().split('T')[0],
+          month_id: selectedMonth.id,
+        });
+      }
 
-    setAmount('');
-    setNote('');
-    onClose();
+      setAmount('');
+      setNote('');
+      onClose();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -98,10 +110,11 @@ export function AddOtherMoneyModal({ isOpen, onClose }: AddOtherMoneyModalProps)
                 step="any"
                 inputMode="decimal"
                 required
+                disabled={isFormLoading || isSubmitting}
                 placeholder="0"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-300 focus:border-slate-900 rounded-lg py-2.5 pl-8 pr-3 text-xl font-bold text-slate-900 focus:outline-none"
+                className="w-full bg-slate-50 border border-slate-300 focus:border-slate-900 rounded-lg py-2.5 pl-8 pr-3 text-xl font-bold text-slate-900 focus:outline-none disabled:opacity-50"
                 autoFocus
               />
             </div>
@@ -111,19 +124,33 @@ export function AddOtherMoneyModal({ isOpen, onClose }: AddOtherMoneyModalProps)
             <label className="block text-xs font-semibold text-slate-700 mb-1">Note / Reason</label>
             <input
               type="text"
+              disabled={isFormLoading || isSubmitting}
               placeholder="e.g. Previous balance adjustment / Guest contribution"
               value={note}
               onChange={(e) => setNote(e.target.value)}
-              className="w-full bg-slate-50 border border-slate-300 focus:border-slate-900 rounded-lg p-2.5 text-sm text-slate-900 focus:outline-none"
+              className="w-full bg-slate-50 border border-slate-300 focus:border-slate-900 rounded-lg p-2.5 text-sm text-slate-900 focus:outline-none disabled:opacity-50"
             />
           </div>
 
           <div className="pt-2">
             <button
               type="submit"
-              className="w-full py-3 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-sm font-bold shadow-xs flex items-center justify-center gap-2"
+              disabled={isFormLoading || isSubmitting}
+              className="w-full py-3 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-sm font-bold shadow-xs flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
             >
-              <Check className="w-4 h-4" /> Save Entry
+              {isFormLoading ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" /> Initializing Mess...
+                </>
+              ) : isSubmitting ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" /> Saving Entry...
+                </>
+              ) : (
+                <>
+                  <Check className="w-4 h-4" /> Save Entry
+                </>
+              )}
             </button>
           </div>
         </form>
