@@ -4,10 +4,11 @@ import React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useData } from '@/lib/data-context';
+import { LogOut, User as UserIcon } from 'lucide-react';
 
 export function Navbar() {
   const pathname = usePathname();
-  const { selectedMonth, months, setSelectedMonthId } = useData();
+  const { selectedMonth, months, setSelectedMonthId, user, signOut } = useData();
 
   const navLinks = [
     { label: 'Home', href: '/' },
@@ -45,19 +46,31 @@ export function Navbar() {
           })}
         </nav>
 
-        {/* Month Selector */}
-        <div>
-          <select
-            value={selectedMonth.id}
-            onChange={(e) => setSelectedMonthId(e.target.value)}
-            className="bg-slate-100 border border-slate-200 text-slate-800 font-semibold text-xs rounded-md px-2.5 py-1 focus:outline-none cursor-pointer"
-          >
-            {months.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.name}
-              </option>
-            ))}
-          </select>
+        {/* Right: Month Selector & Sign Out */}
+        <div className="flex items-center gap-2">
+          {months.length > 0 && (
+            <select
+              value={selectedMonth.id}
+              onChange={(e) => setSelectedMonthId(e.target.value)}
+              className="bg-slate-100 border border-slate-200 text-slate-800 font-semibold text-xs rounded-md px-2.5 py-1 focus:outline-none cursor-pointer"
+            >
+              {months.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}
+                </option>
+              ))}
+            </select>
+          )}
+
+          {user && (
+            <button
+              onClick={() => signOut()}
+              title="Sign Out"
+              className="p-1.5 rounded-md bg-slate-100 hover:bg-rose-50 text-slate-600 hover:text-rose-600 transition-colors"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
+          )}
         </div>
       </div>
     </header>

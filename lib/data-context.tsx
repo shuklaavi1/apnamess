@@ -19,6 +19,8 @@ import {
 } from './mock-data';
 import { calculateMonthFinancials } from './calculations/financials';
 import { createClient } from './supabase/client';
+import { useRouter } from 'next/navigation';
+import { User, Session } from '@supabase/supabase-js';
 
 interface ToastState {
   id: string;
@@ -27,6 +29,8 @@ interface ToastState {
 }
 
 interface DataContextType {
+  user: User | null;
+  session: Session | null;
   messGroup: MessGroup;
   members: MessMember[];
   months: AccountingMonth[];
@@ -51,28 +55,32 @@ interface DataContextType {
   addContribution: (contribution: Omit<Contribution, 'id' | 'created_at' | 'mess_id' | 'month_id'> & { month_id?: string }) => void;
   deleteContribution: (id: string) => void;
 
-  // Member Management Actions
   addMember: (displayName: string, role?: MemberRole, monthlyContribution?: number) => Promise<void>;
   removeMember: (memberId: string) => Promise<void>;
   toggleAdminRole: (memberId: string) => Promise<void>;
 
+  signOut: () => Promise<void>;
   resetToDemoData: () => void;
 }
 
 const DataContext = createContext<DataContextType | undefined>(undefined);
 
 export function DataProvider({ children }: { children: React.ReactNode }) {
+  const [user, setUser] = useState<User | null>(null);
+  const [session, setSession] = useState<Session | null>(null);
+
   const [messGroup, setMessGroup] = useState<MessGroup>(MOCK_MESS_GROUP);
   const [members, setMembers] = useState<MessMember[]>(MOCK_MEMBERS);
   const [months, setMonths] = useState<AccountingMonth[]>(MOCK_MONTHS);
   const [selectedMonthId, setSelectedMonthId] = useState<string>('month-2026-09');
   const [contributions, setContributions] = useState<Contribution[]>(MOCK_CONTRIBUTIONS);
   const [expenses, setExpenses] = useState<Expense[]>(MOCK_EXPENSES);
-  const [currentMemberId, setCurrentMemberId] = useState<string>('mem-001');
+  const [currentMemberId, setCurrentMemberId] = useState<string>('');
 
   const [toasts, setToasts] = useState<ToastState[]>([]);
 
   const supabase = createClient();
+  const router = useRouter();
 
   const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
     const id = Math.random().toString(36).substring(2, 9);
@@ -86,10 +94,41 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
 
-  // Fetch Live Data from Supabase if connected
+  // Auth & Session state listener
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      setUser(session?.user ?? null);
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+      setUser(session?.user ?? null);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  // Fetch Live Data from Supabase
   useEffect(() => {
     async function loadLiveBackendData() {
       try {
+        const { data: dbGroup } = await supabase.from('mess_groups').select('*').limit(1).single();
+        if (dbGroup) {
+          setMessGroup({
+            id: dbGroup.id,
+            name: dbGroup.name || 'ApnaMess',
+            currency: dbGroup.currency || 'INR',
+            timezone: dbGroup.timezone || 'Asia/Kolkata',
+            default_monthly_contribution: Number(dbGroup.default_monthly_contribution || 3000),
+            low_balance_threshold: Number(dbGroup.low_balance_threshold || 1000),
+            created_at: dbGroup.created_at,
+            updated_at: dbGroup.updated_at,
+          });
+        }
+
         const { data: dbMembers } = await supabase.from('mess_members').select('*');
         if (dbMembers && dbMembers.length > 0) {
           setMembers(
@@ -124,6 +163,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
               updated_at: m.updated_at,
             }))
           );
+          setSelectedMonthId(dbMonths[0].id);
         }
 
         const { data: dbContribs } = await supabase.from('contributions').select('*');
@@ -160,18 +200,39 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
           );
         }
       } catch (err) {
-        // Fallback to initial mock data if live table is not pre-populated
+        // Fallback to empty clean states if database table is not pre-populated
       }
     }
 
     loadLiveBackendData();
-  }, []);
+  }, [user]);
 
   const activeMembers = members.filter((m) => m.is_active);
-  const currentMember = activeMembers.find((m) => m.id === currentMemberId) || activeMembers[0] || members[0];
+  const currentMember = activeMembers.find((m) => m.id === currentMemberId) || activeMembers[0] || {
+    id: 'guest',
+    mess_id: messGroup.id,
+    display_name: user?.user_metadata?.full_name || 'Member',
+    role: 'member',
+    monthly_contribution: 3000,
+    is_active: true,
+    joined_at: new Date().toISOString(),
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
   const currentRole = currentMember?.role || 'member';
 
-  const selectedMonth = months.find((m) => m.id === selectedMonthId) || months[0];
+  const selectedMonth = months.find((m) => m.id === selectedMonthId) || months[0] || {
+    id: 'month-2026-09',
+    mess_id: messGroup.id,
+    year: 2026,
+    month_number: 9,
+    name: 'September',
+    expected_contribution: 3000,
+    opening_balance: 0,
+    status: 'open',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
 
   const financials = calculateMonthFinancials(
     selectedMonth,
@@ -212,7 +273,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         note: data.note,
       }]);
     } catch (e) {
-      // Offline / optimistic update saved
+      // Ignored
     }
 
     showToast(`Added purchase ₹${newExpense.amount} for ${newExpense.item_name}`);
@@ -284,7 +345,6 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     showToast(`Deleted contribution from ${existing.member_name}`, 'info');
   };
 
-  // Member Management: Add Person
   const addMember = async (displayName: string, role: MemberRole = 'member', monthlyContribution = 3000) => {
     const newMember: MessMember = {
       id: `mem-${Date.now()}`,
@@ -309,13 +369,12 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         is_active: true,
       }]);
     } catch (e) {
-      // Local state fallback
+      // Local fallback
     }
 
     showToast(`Added ${displayName} to ApnaMess`);
   };
 
-  // Member Management: Remove / Deactivate Person
   const removeMember = async (memberId: string) => {
     const target = members.find((m) => m.id === memberId);
     if (!target) return;
@@ -327,13 +386,12 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     try {
       await supabase.from('mess_members').update({ is_active: false }).eq('id', memberId);
     } catch (e) {
-      // Local state fallback
+      // Local fallback
     }
 
     showToast(`Removed ${target.display_name}`, 'info');
   };
 
-  // Member Management: Admin Creation / Role Toggle
   const toggleAdminRole = async (memberId: string) => {
     const target = members.find((m) => m.id === memberId);
     if (!target) return;
@@ -347,23 +405,32 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     try {
       await supabase.from('mess_members').update({ role: newRole }).eq('id', memberId);
     } catch (e) {
-      // Local state fallback
+      // Local fallback
     }
 
     showToast(`Updated ${target.display_name} role to ${newRole.toUpperCase()}`);
   };
 
+  const signOut = async () => {
+    await supabase.auth.signOut();
+    setUser(null);
+    setSession(null);
+    showToast('Signed out successfully', 'info');
+    router.push('/login');
+  };
+
   const resetToDemoData = () => {
-    setMembers(MOCK_MEMBERS);
-    setContributions(MOCK_CONTRIBUTIONS);
-    setExpenses(MOCK_EXPENSES);
-    setCurrentMemberId('mem-001');
-    showToast('Reset data to initial state', 'info');
+    setMembers([]);
+    setContributions([]);
+    setExpenses([]);
+    showToast('Reset data to clean production state', 'info');
   };
 
   return (
     <DataContext.Provider
       value={{
+        user,
+        session,
         messGroup,
         members: activeMembers,
         months,
@@ -385,6 +452,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         addMember,
         removeMember,
         toggleAdminRole,
+        signOut,
         resetToDemoData,
       }}
     >

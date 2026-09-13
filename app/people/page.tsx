@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import { useData } from '@/lib/data-context';
 import { MemberRole } from '@/lib/types';
 import Link from 'next/link';
-import { Plus, UserX, ShieldCheck, X, Check } from 'lucide-react';
+import { Plus, UserX, ShieldCheck, X, Check, Users } from 'lucide-react';
 
 export default function PeoplePage() {
   const { members, financials, selectedMonth, addMember, removeMember, toggleAdminRole } = useData();
@@ -44,7 +44,7 @@ export default function PeoplePage() {
       <div className="flex items-center justify-between border-b border-slate-200 pb-3">
         <div>
           <h1 className="text-xl font-bold text-slate-900">People</h1>
-          <p className="text-xs text-slate-500">ApnaMess household members</p>
+          <p className="text-xs text-slate-500">ApnaMess household members ({members.length})</p>
         </div>
 
         <button
@@ -55,52 +55,59 @@ export default function PeoplePage() {
         </button>
       </div>
 
-      <div className="divide-y divide-slate-100 border-t border-b border-slate-200 bg-white">
-        {members.map((member) => {
-          const summary = financials.member_summaries.find((s) => s.member_id === member.id);
-          const isPaid = summary?.is_fully_paid;
+      {members.length === 0 ? (
+        <div className="text-center py-12 bg-white border border-slate-200 rounded-xl space-y-2 p-6">
+          <Users className="w-8 h-8 text-slate-400 mx-auto" />
+          <h3 className="text-sm font-bold text-slate-900">No members added yet</h3>
+          <p className="text-xs text-slate-500">Tap '+ Add Person' above to add your shared household members.</p>
+        </div>
+      ) : (
+        <div className="divide-y divide-slate-100 border-t border-b border-slate-200 bg-white">
+          {members.map((member) => {
+            const summary = financials.member_summaries.find((s) => s.member_id === member.id);
+            const isPaid = summary?.is_fully_paid;
 
-          return (
-            <div
-              key={member.id}
-              className="py-3 px-3 flex items-center justify-between hover:bg-slate-50 transition-colors text-xs"
-            >
-              <Link href={`/people/${member.id}`} className="flex-1">
+            return (
+              <div
+                key={member.id}
+                className="py-3 px-3 flex items-center justify-between hover:bg-slate-50 transition-colors text-xs"
+              >
+                <Link href={`/people/${member.id}`} className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-slate-900 text-sm">{member.display_name}</span>
+                    {member.role === 'admin' && (
+                      <span className="text-[10px] px-1.5 py-0.2 bg-amber-50 text-amber-800 border border-amber-200 font-semibold rounded flex items-center gap-1">
+                        <ShieldCheck className="w-3 h-3 text-amber-600" /> Admin
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-slate-500 mt-0.5">
+                    {selectedMonth?.name || 'Month'} {isPaid ? '✓' : 'pending'}
+                  </div>
+                </Link>
+
                 <div className="flex items-center gap-2">
-                  <span className="font-bold text-slate-900 text-sm">{member.display_name}</span>
-                  {member.role === 'admin' && (
-                    <span className="text-[10px] px-1.5 py-0.2 bg-amber-50 text-amber-800 border border-amber-200 font-semibold rounded flex items-center gap-1">
-                      <ShieldCheck className="w-3 h-3 text-amber-600" /> Admin
-                    </span>
-                  )}
-                </div>
-                <div className="text-slate-500 mt-0.5">
-                  {selectedMonth.name} {isPaid ? '✓' : 'pending'}
-                </div>
-              </Link>
+                  <button
+                    onClick={(e) => handleToggleAdmin(e, member.id)}
+                    className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-[11px] font-semibold transition-colors"
+                    title="Toggle Admin role"
+                  >
+                    {member.role === 'admin' ? 'Make Member' : 'Make Admin'}
+                  </button>
 
-              {/* Actions: Admin Role & Remove Person */}
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={(e) => handleToggleAdmin(e, member.id)}
-                  className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-[11px] font-semibold transition-colors"
-                  title="Toggle Admin role"
-                >
-                  {member.role === 'admin' ? 'Make Member' : 'Make Admin'}
-                </button>
-
-                <button
-                  onClick={(e) => handleRemove(e, member.id, member.display_name)}
-                  className="p-1 rounded text-slate-300 hover:text-rose-600 transition-colors"
-                  title="Remove Person"
-                >
-                  <UserX className="w-4 h-4" />
-                </button>
+                  <button
+                    onClick={(e) => handleRemove(e, member.id, member.display_name)}
+                    className="p-1 rounded text-slate-300 hover:text-rose-600 transition-colors"
+                    title="Remove Person"
+                  >
+                    <UserX className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* Add Person Modal */}
       {showAddModal && (
