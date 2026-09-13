@@ -1,17 +1,12 @@
 'use client';
 
-import React, { createContext, useContext, useState } from 'react';
+import React, { createContext, useContext, useState, useEffect } from 'react';
 import {
   MessGroup,
   MessMember,
   AccountingMonth,
-  Category,
   Contribution,
   Expense,
-  Settlement,
-  CashAdjustment,
-  RecurringExpense,
-  ActivityLog,
   FinancialSummary,
   MemberRole,
 } from './types';
@@ -19,15 +14,11 @@ import {
   MOCK_MESS_GROUP,
   MOCK_MEMBERS,
   MOCK_MONTHS,
-  MOCK_CATEGORIES,
   MOCK_CONTRIBUTIONS,
   MOCK_EXPENSES,
-  MOCK_SETTLEMENTS,
-  MOCK_CASH_ADJUSTMENTS,
-  MOCK_RECURRING_EXPENSES,
-  MOCK_ACTIVITY_LOGS,
 } from './mock-data';
 import { calculateMonthFinancials } from './calculations/financials';
+import { createClient } from './supabase/client';
 
 interface ToastState {
   id: string;
@@ -40,13 +31,8 @@ interface DataContextType {
   members: MessMember[];
   months: AccountingMonth[];
   selectedMonth: AccountingMonth;
-  categories: Category[];
   contributions: Contribution[];
   expenses: Expense[];
-  settlements: Settlement[];
-  cashAdjustments: CashAdjustment[];
-  recurringExpenses: RecurringExpense[];
-  activityLogs: ActivityLog[];
   currentMember: MessMember;
   currentRole: MemberRole;
 
@@ -65,26 +51,28 @@ interface DataContextType {
   addContribution: (contribution: Omit<Contribution, 'id' | 'created_at' | 'mess_id' | 'month_id'> & { month_id?: string }) => void;
   deleteContribution: (id: string) => void;
 
+  // Member Management Actions
+  addMember: (displayName: string, role?: MemberRole, monthlyContribution?: number) => Promise<void>;
+  removeMember: (memberId: string) => Promise<void>;
+  toggleAdminRole: (memberId: string) => Promise<void>;
+
   resetToDemoData: () => void;
 }
 
 const DataContext = createContext<DataContextType | undefined>(undefined);
 
 export function DataProvider({ children }: { children: React.ReactNode }) {
-  const [messGroup] = useState<MessGroup>(MOCK_MESS_GROUP);
+  const [messGroup, setMessGroup] = useState<MessGroup>(MOCK_MESS_GROUP);
   const [members, setMembers] = useState<MessMember[]>(MOCK_MEMBERS);
-  const [months] = useState<AccountingMonth[]>(MOCK_MONTHS);
+  const [months, setMonths] = useState<AccountingMonth[]>(MOCK_MONTHS);
   const [selectedMonthId, setSelectedMonthId] = useState<string>('month-2026-09');
-  const [categories] = useState<Category[]>(MOCK_CATEGORIES);
   const [contributions, setContributions] = useState<Contribution[]>(MOCK_CONTRIBUTIONS);
   const [expenses, setExpenses] = useState<Expense[]>(MOCK_EXPENSES);
-  const [settlements] = useState<Settlement[]>(MOCK_SETTLEMENTS);
-  const [cashAdjustments] = useState<CashAdjustment[]>(MOCK_CASH_ADJUSTMENTS);
-  const [recurringExpenses] = useState<RecurringExpense[]>(MOCK_RECURRING_EXPENSES);
-  const [activityLogs] = useState<ActivityLog[]>(MOCK_ACTIVITY_LOGS);
   const [currentMemberId, setCurrentMemberId] = useState<string>('mem-001');
 
   const [toasts, setToasts] = useState<ToastState[]>([]);
+
+  const supabase = createClient();
 
   const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
     const id = Math.random().toString(36).substring(2, 9);
@@ -98,20 +86,101 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
 
-  const currentMember = members.find((m) => m.id === currentMemberId) || members[0];
+  // Fetch Live Data from Supabase if connected
+  useEffect(() => {
+    async function loadLiveBackendData() {
+      try {
+        const { data: dbMembers } = await supabase.from('mess_members').select('*');
+        if (dbMembers && dbMembers.length > 0) {
+          setMembers(
+            dbMembers.map((m: any) => ({
+              id: m.id,
+              mess_id: m.mess_id,
+              display_name: m.display_name,
+              role: m.role || 'member',
+              monthly_contribution: Number(m.monthly_contribution || 3000),
+              is_active: m.is_active ?? true,
+              joined_at: m.joined_at || m.created_at,
+              created_at: m.created_at,
+              updated_at: m.updated_at,
+            }))
+          );
+        }
+
+        const { data: dbMonths } = await supabase.from('months').select('*');
+        if (dbMonths && dbMonths.length > 0) {
+          setMonths(
+            dbMonths.map((m: any) => ({
+              id: m.id,
+              mess_id: m.mess_id,
+              year: m.year,
+              month_number: m.month_number,
+              name: m.name,
+              expected_contribution: Number(m.expected_contribution || 3000),
+              opening_balance: Number(m.opening_balance || 0),
+              status: m.status || 'open',
+              closed_at: m.closed_at,
+              created_at: m.created_at,
+              updated_at: m.updated_at,
+            }))
+          );
+        }
+
+        const { data: dbContribs } = await supabase.from('contributions').select('*');
+        if (dbContribs && dbContribs.length > 0) {
+          setContributions(
+            dbContribs.map((c: any) => ({
+              id: c.id,
+              mess_id: c.mess_id,
+              month_id: c.month_id,
+              member_id: c.member_id,
+              amount: Number(c.amount),
+              payment_date: c.payment_date,
+              payment_method: c.payment_method,
+              note: c.note,
+              created_at: c.created_at,
+            }))
+          );
+        }
+
+        const { data: dbExpenses } = await supabase.from('expenses').select('*');
+        if (dbExpenses && dbExpenses.length > 0) {
+          setExpenses(
+            dbExpenses.map((e: any) => ({
+              id: e.id,
+              mess_id: e.mess_id,
+              month_id: e.month_id,
+              item_name: e.item_name,
+              amount: Number(e.amount),
+              expense_date: e.expense_date,
+              paid_by_member_id: e.paid_by_member_id,
+              payment_source: e.payment_source || 'common_fund',
+              created_at: e.created_at,
+            }))
+          );
+        }
+      } catch (err) {
+        // Fallback to initial mock data if live table is not pre-populated
+      }
+    }
+
+    loadLiveBackendData();
+  }, []);
+
+  const activeMembers = members.filter((m) => m.is_active);
+  const currentMember = activeMembers.find((m) => m.id === currentMemberId) || activeMembers[0] || members[0];
   const currentRole = currentMember?.role || 'member';
 
   const selectedMonth = months.find((m) => m.id === selectedMonthId) || months[0];
 
-  // Financials formula calculation
   const financials = calculateMonthFinancials(
     selectedMonth,
-    members,
+    activeMembers,
     contributions,
     expenses
   );
 
-  const addExpense = (data: Omit<Expense, 'id' | 'created_at' | 'mess_id' | 'month_id'> & { month_id?: string }) => {
+  const addExpense = async (data: Omit<Expense, 'id' | 'created_at' | 'mess_id' | 'month_id'> & { month_id?: string }) => {
     const targetMonthId = data.month_id || selectedMonth.id;
     const payer = members.find((m) => m.id === data.paid_by_member_id);
 
@@ -130,18 +199,41 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     };
 
     setExpenses((prev) => [newExpense, ...prev]);
-    showToast(`Added expense ₹${newExpense.amount} for ${newExpense.item_name}`);
+
+    try {
+      await supabase.from('expenses').insert([{
+        mess_id: messGroup.id,
+        month_id: targetMonthId,
+        item_name: data.item_name,
+        amount: Number(data.amount),
+        expense_date: data.expense_date,
+        paid_by_member_id: data.paid_by_member_id,
+        payment_source: data.payment_source,
+        note: data.note,
+      }]);
+    } catch (e) {
+      // Offline / optimistic update saved
+    }
+
+    showToast(`Added purchase ₹${newExpense.amount} for ${newExpense.item_name}`);
   };
 
-  const deleteExpense = (id: string) => {
+  const deleteExpense = async (id: string) => {
     const existing = expenses.find((e) => e.id === id);
     if (!existing) return;
 
     setExpenses((prev) => prev.filter((e) => e.id !== id));
+
+    try {
+      await supabase.from('expenses').delete().eq('id', id);
+    } catch (e) {
+      // Ignored
+    }
+
     showToast(`Deleted expense "${existing.item_name}"`, 'info');
   };
 
-  const addContribution = (data: Omit<Contribution, 'id' | 'created_at' | 'mess_id' | 'month_id'> & { month_id?: string }) => {
+  const addContribution = async (data: Omit<Contribution, 'id' | 'created_at' | 'mess_id' | 'month_id'> & { month_id?: string }) => {
     const targetMonthId = data.month_id || selectedMonth.id;
     const payer = members.find((m) => m.id === data.member_id);
 
@@ -159,15 +251,106 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     };
 
     setContributions((prev) => [newContrib, ...prev]);
+
+    try {
+      await supabase.from('contributions').insert([{
+        mess_id: messGroup.id,
+        month_id: targetMonthId,
+        member_id: data.member_id,
+        amount: Number(data.amount),
+        payment_date: data.payment_date,
+        payment_method: data.payment_method || 'UPI',
+        note: data.note,
+      }]);
+    } catch (e) {
+      // Ignored
+    }
+
     showToast(`Recorded contribution ₹${newContrib.amount} from ${newContrib.member_name}`);
   };
 
-  const deleteContribution = (id: string) => {
+  const deleteContribution = async (id: string) => {
     const existing = contributions.find((c) => c.id === id);
     if (!existing) return;
 
     setContributions((prev) => prev.filter((c) => c.id !== id));
+
+    try {
+      await supabase.from('contributions').delete().eq('id', id);
+    } catch (e) {
+      // Ignored
+    }
+
     showToast(`Deleted contribution from ${existing.member_name}`, 'info');
+  };
+
+  // Member Management: Add Person
+  const addMember = async (displayName: string, role: MemberRole = 'member', monthlyContribution = 3000) => {
+    const newMember: MessMember = {
+      id: `mem-${Date.now()}`,
+      mess_id: messGroup.id,
+      display_name: displayName,
+      role,
+      monthly_contribution: Number(monthlyContribution),
+      is_active: true,
+      joined_at: new Date().toISOString(),
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    setMembers((prev) => [...prev, newMember]);
+
+    try {
+      await supabase.from('mess_members').insert([{
+        mess_id: messGroup.id,
+        display_name: displayName,
+        role,
+        monthly_contribution: Number(monthlyContribution),
+        is_active: true,
+      }]);
+    } catch (e) {
+      // Local state fallback
+    }
+
+    showToast(`Added ${displayName} to ApnaMess`);
+  };
+
+  // Member Management: Remove / Deactivate Person
+  const removeMember = async (memberId: string) => {
+    const target = members.find((m) => m.id === memberId);
+    if (!target) return;
+
+    setMembers((prev) =>
+      prev.map((m) => (m.id === memberId ? { ...m, is_active: false } : m))
+    );
+
+    try {
+      await supabase.from('mess_members').update({ is_active: false }).eq('id', memberId);
+    } catch (e) {
+      // Local state fallback
+    }
+
+    showToast(`Removed ${target.display_name}`, 'info');
+  };
+
+  // Member Management: Admin Creation / Role Toggle
+  const toggleAdminRole = async (memberId: string) => {
+    const target = members.find((m) => m.id === memberId);
+    if (!target) return;
+
+    const newRole: MemberRole = target.role === 'admin' ? 'member' : 'admin';
+
+    setMembers((prev) =>
+      prev.map((m) => (m.id === memberId ? { ...m, role: newRole } : m))
+    );
+
+    try {
+      await supabase.from('mess_members').update({ role: newRole }).eq('id', memberId);
+    } catch (e) {
+      // Local state fallback
+    }
+
+    showToast(`Updated ${target.display_name} role to ${newRole.toUpperCase()}`);
   };
 
   const resetToDemoData = () => {
@@ -182,16 +365,11 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     <DataContext.Provider
       value={{
         messGroup,
-        members,
+        members: activeMembers,
         months,
         selectedMonth,
-        categories,
         contributions,
         expenses,
-        settlements,
-        cashAdjustments,
-        recurringExpenses,
-        activityLogs,
         currentMember,
         currentRole,
         financials,
@@ -204,6 +382,9 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         deleteExpense,
         addContribution,
         deleteContribution,
+        addMember,
+        removeMember,
+        toggleAdminRole,
         resetToDemoData,
       }}
     >
