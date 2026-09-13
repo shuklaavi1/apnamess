@@ -121,8 +121,15 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
 
       let group = dbGroups && dbGroups.length > 0 ? dbGroups[0] : null;
 
-      if (!group) {
-        const { data: newGroups } = await supabase
+      if (!group && user) {
+        // Ensure profile exists for user before creating mess group
+        const { data: p } = await supabase.from('profiles').select('id').eq('id', user.id).maybeSingle();
+        if (!p) {
+          const userDisplayName = user.user_metadata?.full_name || user.email?.split('@')[0] || 'User';
+          await supabase.from('profiles').insert([{ id: user.id, full_name: userDisplayName }]);
+        }
+
+        const { data: newGroups, error: createErr } = await supabase
           .from('mess_groups')
           .insert([
             {
@@ -131,6 +138,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
               timezone: 'Asia/Kolkata',
               default_monthly_contribution: 3000,
               low_balance_threshold: 1000,
+              created_by: user.id,
             },
           ])
           .select('*');
@@ -138,7 +146,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         if (newGroups && newGroups.length > 0) {
           group = newGroups[0];
         } else {
-          // Fallback refetch
+          if (createErr) console.error('Error creating mess_groups:', createErr);
           const { data: retryGroups } = await supabase.from('mess_groups').select('*').order('created_at', { ascending: true });
           group = retryGroups && retryGroups.length > 0 ? retryGroups[0] : null;
         }
@@ -418,20 +426,29 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
 
     const { data: dbGroups } = await supabase.from('mess_groups').select('*').order('created_at', { ascending: true });
     if (dbGroups && dbGroups.length > 0) {
+      const g = dbGroups[0];
       setMessGroup({
-        id: dbGroups[0].id,
-        name: dbGroups[0].name || 'ApnaMess',
-        currency: dbGroups[0].currency || 'INR',
-        timezone: dbGroups[0].timezone || 'Asia/Kolkata',
-        default_monthly_contribution: Number(dbGroups[0].default_monthly_contribution || 3000),
-        low_balance_threshold: Number(dbGroups[0].low_balance_threshold || 1000),
-        created_at: dbGroups[0].created_at,
-        updated_at: dbGroups[0].updated_at,
+        id: g.id,
+        name: g.name || 'ApnaMess',
+        currency: g.currency || 'INR',
+        timezone: g.timezone || 'Asia/Kolkata',
+        default_monthly_contribution: Number(g.default_monthly_contribution || 3000),
+        low_balance_threshold: Number(g.low_balance_threshold || 1000),
+        created_at: g.created_at,
+        updated_at: g.updated_at,
       });
-      return dbGroups[0].id;
+      return g.id;
     }
 
-    const { data: insertedGroups } = await supabase
+    if (user) {
+      const { data: p } = await supabase.from('profiles').select('id').eq('id', user.id).maybeSingle();
+      if (!p) {
+        const name = user.user_metadata?.full_name || user.email?.split('@')[0] || 'User';
+        await supabase.from('profiles').insert([{ id: user.id, full_name: name }]);
+      }
+    }
+
+    const { data: insertedGroups, error: insErr } = await supabase
       .from('mess_groups')
       .insert([
         {
@@ -440,27 +457,44 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
           timezone: 'Asia/Kolkata',
           default_monthly_contribution: 3000,
           low_balance_threshold: 1000,
+          created_by: user?.id || null,
         },
       ])
       .select('*');
 
     if (insertedGroups && insertedGroups.length > 0) {
+      const g = insertedGroups[0];
       setMessGroup({
-        id: insertedGroups[0].id,
-        name: insertedGroups[0].name || 'ApnaMess',
-        currency: insertedGroups[0].currency || 'INR',
-        timezone: insertedGroups[0].timezone || 'Asia/Kolkata',
-        default_monthly_contribution: Number(insertedGroups[0].default_monthly_contribution || 3000),
-        low_balance_threshold: Number(insertedGroups[0].low_balance_threshold || 1000),
-        created_at: insertedGroups[0].created_at,
-        updated_at: insertedGroups[0].updated_at,
+        id: g.id,
+        name: g.name || 'ApnaMess',
+        currency: g.currency || 'INR',
+        timezone: g.timezone || 'Asia/Kolkata',
+        default_monthly_contribution: Number(g.default_monthly_contribution || 3000),
+        low_balance_threshold: Number(g.low_balance_threshold || 1000),
+        created_at: g.created_at,
+        updated_at: g.updated_at,
       });
-      return insertedGroups[0].id;
+      return g.id;
+    }
+
+    if (insErr) {
+      console.error('Error inserting mess_groups:', insErr);
     }
 
     const { data: refetched } = await supabase.from('mess_groups').select('*').order('created_at', { ascending: true });
     if (refetched && refetched.length > 0) {
-      return refetched[0].id;
+      const g = refetched[0];
+      setMessGroup({
+        id: g.id,
+        name: g.name || 'ApnaMess',
+        currency: g.currency || 'INR',
+        timezone: g.timezone || 'Asia/Kolkata',
+        default_monthly_contribution: Number(g.default_monthly_contribution || 3000),
+        low_balance_threshold: Number(g.low_balance_threshold || 1000),
+        created_at: g.created_at,
+        updated_at: g.updated_at,
+      });
+      return g.id;
     }
 
     return null;
@@ -476,7 +510,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     const targetMessId = await resolveMessId();
 
     if (!targetMessId) {
-      showToast('Unable to connect to ApnaMess backend. Please check your connection.', 'error');
+      showToast('Could not initialize shared mess group. Please try signing in again.', 'error');
       return;
     }
 
@@ -488,7 +522,12 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
-    const payer = members.find((m) => m.id === data.paid_by_member_id);
+    let targetMemberId = data.paid_by_member_id;
+    if (!targetMemberId || !members.some((m) => m.id === targetMemberId)) {
+      targetMemberId = currentMember?.id || members[0]?.id;
+    }
+
+    const payer = members.find((m) => m.id === targetMemberId);
 
     const { error } = await supabase.from('expenses').insert([
       {
@@ -497,7 +536,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         item_name: data.item_name,
         amount: Number(data.amount),
         expense_date: data.expense_date,
-        paid_by_member_id: data.paid_by_member_id,
+        paid_by_member_id: targetMemberId,
         payment_source: data.payment_source || 'common_fund',
         note: data.note || null,
       },
@@ -539,7 +578,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     const targetMessId = await resolveMessId();
 
     if (!targetMessId) {
-      showToast('Unable to connect to ApnaMess backend. Please check your connection.', 'error');
+      showToast('Could not initialize shared mess group. Please try signing in again.', 'error');
       return;
     }
 
@@ -571,13 +610,23 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    const payer = members.find((m) => m.id === data.member_id);
+    let targetMemberId = data.member_id;
+    if (!targetMemberId || !members.some((m) => m.id === targetMemberId)) {
+      targetMemberId = currentMember?.id || members[0]?.id;
+    }
+
+    if (!targetMemberId) {
+      showToast('Please select a valid member.', 'error');
+      return;
+    }
+
+    const payer = members.find((m) => m.id === targetMemberId);
 
     const { error } = await supabase.from('contributions').insert([
       {
         mess_id: targetMessId,
         month_id: targetMonthId,
-        member_id: data.member_id,
+        member_id: targetMemberId,
         amount: Number(data.amount),
         payment_date: data.payment_date,
         payment_method: data.payment_method || 'UPI',
@@ -621,7 +670,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     const targetMessId = await resolveMessId();
 
     if (!targetMessId) {
-      showToast('Unable to connect to ApnaMess backend. Please check your connection.', 'error');
+      showToast('Could not initialize shared mess group. Please try signing in again.', 'error');
       return;
     }
 
