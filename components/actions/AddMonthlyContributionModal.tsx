@@ -12,9 +12,20 @@ interface AddMonthlyContributionModalProps {
 export function AddMonthlyContributionModal({ isOpen, onClose }: AddMonthlyContributionModalProps) {
   const { members, currentMember, addContribution, months, selectedMonth } = useData();
 
-  const [memberId, setMemberId] = useState(currentMember.id);
+  const [memberId, setMemberId] = useState('');
   const [amount, setAmount] = useState('3000');
-  const [monthId, setMonthId] = useState(selectedMonth.id);
+  const [monthId, setMonthId] = useState('');
+
+  React.useEffect(() => {
+    if (isOpen) {
+      if (!memberId || !members.some((m) => m.id === memberId)) {
+        setMemberId(currentMember?.id || members[0]?.id || '');
+      }
+      if (!monthId) {
+        setMonthId(selectedMonth?.id || '');
+      }
+    }
+  }, [isOpen, members, currentMember, selectedMonth, memberId, monthId]);
 
   if (!isOpen) return null;
 
@@ -26,15 +37,21 @@ export function AddMonthlyContributionModal({ isOpen, onClose }: AddMonthlyContr
       return;
     }
 
+    const selectedPayerId = memberId || currentMember?.id || members[0]?.id || '';
+    const selectedTargetMonthId = monthId || selectedMonth?.id || '';
+
     addContribution({
-      member_id: memberId,
+      member_id: selectedPayerId,
       amount: Number(amount),
       payment_date: new Date().toISOString().split('T')[0],
-      month_id: monthId,
+      month_id: selectedTargetMonthId,
     });
 
     onClose();
   };
+
+  const currentPayerValue = memberId || currentMember?.id || members[0]?.id || '';
+  const currentMonthValue = monthId || selectedMonth?.id || '';
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/50 backdrop-blur-xs p-0 sm:p-4">
@@ -50,15 +67,19 @@ export function AddMonthlyContributionModal({ isOpen, onClose }: AddMonthlyContr
           <div>
             <label className="block text-xs font-semibold text-slate-700 mb-1">Who?</label>
             <select
-              value={memberId}
+              value={currentPayerValue}
               onChange={(e) => setMemberId(e.target.value)}
               className="w-full bg-slate-50 border border-slate-300 focus:border-slate-900 rounded-lg p-2.5 text-sm text-slate-900 focus:outline-none"
             >
-              {members.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.display_name}
-                </option>
-              ))}
+              {members.length === 0 ? (
+                <option value={currentMember?.id || ''}>{currentMember?.display_name || 'Member'}</option>
+              ) : (
+                members.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.display_name}
+                  </option>
+                ))
+              )}
             </select>
           </div>
 

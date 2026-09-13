@@ -136,9 +136,8 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         }
 
         const { data: dbMembers } = await supabase.from('mess_members').select('*');
-        if (dbMembers && dbMembers.length > 0) {
-          setMembers(
-            dbMembers.map((m: any) => ({
+        let fetchedMembers: MessMember[] = dbMembers && dbMembers.length > 0
+          ? dbMembers.map((m: any) => ({
               id: m.id,
               mess_id: m.mess_id,
               display_name: m.display_name,
@@ -148,9 +147,78 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
               joined_at: m.joined_at || m.created_at,
               created_at: m.created_at,
               updated_at: m.updated_at,
+              user_id: m.user_id,
             }))
+          : [];
+
+        // Auto-sync logged-in user into mess_members so everyone can see them
+        if (user) {
+          const userDisplayName = user.user_metadata?.full_name || user.email?.split('@')[0] || 'User';
+          const existingUserMember = fetchedMembers.find(
+            (m: any) => m.user_id === user.id || m.display_name.toLowerCase() === userDisplayName.toLowerCase()
           );
+
+          if (!existingUserMember) {
+            try {
+              const targetMessId = dbGroup?.id || messGroup.id || 'mess-apna-001';
+              const { data: newDbMember } = await supabase
+                .from('mess_members')
+                .insert([{
+                  mess_id: targetMessId,
+                  user_id: user.id,
+                  display_name: userDisplayName,
+                  role: 'member',
+                  monthly_contribution: 3000,
+                  is_active: true,
+                }])
+                .select()
+                .single();
+
+              if (newDbMember) {
+                fetchedMembers.push({
+                  id: newDbMember.id,
+                  mess_id: newDbMember.mess_id,
+                  display_name: newDbMember.display_name,
+                  role: newDbMember.role || 'member',
+                  monthly_contribution: Number(newDbMember.monthly_contribution || 3000),
+                  is_active: true,
+                  joined_at: newDbMember.joined_at || newDbMember.created_at,
+                  created_at: newDbMember.created_at,
+                  updated_at: newDbMember.updated_at,
+                  user_id: newDbMember.user_id,
+                });
+              } else {
+                fetchedMembers.push({
+                  id: `mem-${user.id.substring(0, 8)}`,
+                  mess_id: targetMessId,
+                  display_name: userDisplayName,
+                  role: 'member',
+                  monthly_contribution: 3000,
+                  is_active: true,
+                  joined_at: new Date().toISOString(),
+                  created_at: new Date().toISOString(),
+                  updated_at: new Date().toISOString(),
+                  user_id: user.id,
+                });
+              }
+            } catch (e) {
+              fetchedMembers.push({
+                id: `mem-${user.id.substring(0, 8)}`,
+                mess_id: messGroup.id || 'mess-apna-001',
+                display_name: userDisplayName,
+                role: 'member',
+                monthly_contribution: 3000,
+                is_active: true,
+                joined_at: new Date().toISOString(),
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+                user_id: user.id,
+              });
+            }
+          }
         }
+
+        setMembers(fetchedMembers);
 
         const { data: dbMonths } = await supabase.from('months').select('*');
         if (dbMonths && dbMonths.length > 0) {
@@ -213,11 +281,30 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     loadLiveBackendData();
   }, [user]);
 
+  // Sync currentMemberId when user or members change
+  useEffect(() => {
+    if (members.length > 0) {
+      if (user) {
+        const userDisplayName = user.user_metadata?.full_name || user.email?.split('@')[0];
+        const match = members.find(
+          (m: any) => m.user_id === user.id || m.display_name.toLowerCase() === userDisplayName?.toLowerCase()
+        );
+        if (match) {
+          setCurrentMemberId(match.id);
+        } else if (!currentMemberId) {
+          setCurrentMemberId(members[0].id);
+        }
+      } else if (!currentMemberId) {
+        setCurrentMemberId(members[0].id);
+      }
+    }
+  }, [user, members]);
+
   const activeMembers = members.filter((m) => m.is_active);
   const currentMember = activeMembers.find((m) => m.id === currentMemberId) || activeMembers[0] || {
-    id: 'guest',
+    id: user?.id ? `mem-${user.id.substring(0, 8)}` : 'guest',
     mess_id: messGroup.id,
-    display_name: user?.user_metadata?.full_name || 'Member',
+    display_name: user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Member',
     role: 'member',
     monthly_contribution: 3000,
     is_active: true,
