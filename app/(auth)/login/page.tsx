@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
-import { LogIn, Mail, Lock, ArrowRight } from 'lucide-react';
+import { Mail, Lock, ArrowRight, AlertCircle } from 'lucide-react';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -17,12 +17,22 @@ export default function LoginPage() {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!email.trim()) {
+      setErrorMsg('Please enter your email address');
+      return;
+    }
+    if (!password) {
+      setErrorMsg('Please enter your password');
+      return;
+    }
+
     setLoading(true);
     setErrorMsg(null);
 
     try {
       const { error } = await supabase.auth.signInWithPassword({
-        email,
+        email: email.trim(),
         password,
       });
 
@@ -30,6 +40,7 @@ export default function LoginPage() {
         setErrorMsg(error.message);
       } else {
         router.push('/');
+        router.refresh();
       }
     } catch (err: any) {
       setErrorMsg(err.message || 'An unexpected error occurred');
@@ -39,54 +50,56 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4">
-      <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl">
-        <div className="text-center space-y-2">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-teal-600 to-emerald-400 text-white font-black text-2xl flex items-center justify-center mx-auto shadow-lg">
-            📜
-          </div>
-          <h1 className="text-2xl font-black tracking-tight text-white">Sign In to Mess Manager</h1>
-          <p className="text-xs text-slate-400">Manage shared household expenses & monthly balances</p>
+    <div className="min-h-screen bg-slate-50 text-slate-900 flex items-center justify-center p-4">
+      <div className="w-full max-w-sm bg-white border border-slate-200 rounded-2xl p-6 sm:p-8 space-y-6 shadow-xs">
+        {/* Header Wordmark */}
+        <div className="text-center space-y-1">
+          <Link href="/" className="font-extrabold text-2xl text-slate-900 tracking-tight block">
+            ApnaMess
+          </Link>
+          <p className="text-xs text-slate-500">Sign in to your shared mess</p>
         </div>
 
+        {/* Error Banner */}
         {errorMsg && (
-          <div className="p-3 bg-rose-950/60 border border-rose-800 text-rose-200 text-xs rounded-xl">
-            {errorMsg}
+          <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 text-xs rounded-lg font-medium flex items-start gap-2">
+            <AlertCircle className="w-4 h-4 text-rose-600 flex-shrink-0 mt-0.5" />
+            <span>{errorMsg}</span>
           </div>
         )}
 
         <form onSubmit={handleLogin} className="space-y-4">
           <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1">Email Address</label>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">Email Address</label>
             <div className="relative">
-              <Mail className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+              <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="email"
                 required
                 placeholder="name@example.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 focus:border-teal-500 rounded-xl py-3 pl-10 pr-4 text-xs text-white placeholder-slate-500 focus:outline-none"
+                className="w-full bg-slate-50 border border-slate-300 focus:border-slate-900 rounded-lg py-2.5 pl-9 pr-3 text-xs text-slate-900 placeholder-slate-400 focus:outline-none"
               />
             </div>
           </div>
 
           <div>
             <div className="flex items-center justify-between mb-1">
-              <label className="block text-xs font-semibold text-slate-300">Password</label>
-              <Link href="/reset-password" className="text-[11px] text-teal-400 hover:underline">
+              <label className="block text-xs font-semibold text-slate-700">Password</label>
+              <Link href="/reset-password" className="text-[11px] text-slate-600 font-semibold hover:underline">
                 Forgot password?
               </Link>
             </div>
             <div className="relative">
-              <Lock className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+              <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="password"
                 required
                 placeholder="••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 focus:border-teal-500 rounded-xl py-3 pl-10 pr-4 text-xs text-white placeholder-slate-500 focus:outline-none"
+                className="w-full bg-slate-50 border border-slate-300 focus:border-slate-900 rounded-lg py-2.5 pl-9 pr-3 text-xs text-slate-900 placeholder-slate-400 focus:outline-none"
               />
             </div>
           </div>
@@ -94,15 +107,15 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-3.5 bg-teal-600 hover:bg-teal-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-teal-900/30 flex items-center justify-center gap-2 transition-all"
+            className="w-full py-3 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold shadow-xs flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
           >
             {loading ? 'Signing in...' : 'Sign In'} <ArrowRight className="w-4 h-4" />
           </button>
         </form>
 
-        <div className="text-center text-xs text-slate-400 pt-2 border-t border-slate-800">
+        <div className="text-center text-xs text-slate-500 pt-3 border-t border-slate-100">
           Don't have an account?{' '}
-          <Link href="/signup" className="text-teal-400 font-bold hover:underline">
+          <Link href="/signup" className="text-slate-900 font-bold hover:underline">
             Sign Up
           </Link>
         </div>
