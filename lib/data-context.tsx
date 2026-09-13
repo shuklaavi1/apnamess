@@ -117,7 +117,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Fetch Live Data from Supabase with safe try-catch
+  // Fetch Live Data from Supabase with safe try-catch & local cache persistence
   useEffect(() => {
     async function loadLiveBackendData() {
       try {
@@ -151,72 +151,12 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
             }))
           : [];
 
-        // Auto-sync logged-in user into mess_members so everyone can see them
-        if (user) {
-          const userDisplayName = user.user_metadata?.full_name || user.email?.split('@')[0] || 'User';
-          const existingUserMember = fetchedMembers.find(
-            (m: any) => m.user_id === user.id || m.display_name.toLowerCase() === userDisplayName.toLowerCase()
-          );
-
-          if (!existingUserMember) {
-            try {
-              const targetMessId = dbGroup?.id || messGroup.id || 'mess-apna-001';
-              const { data: newDbMember } = await supabase
-                .from('mess_members')
-                .insert([{
-                  mess_id: targetMessId,
-                  user_id: user.id,
-                  display_name: userDisplayName,
-                  role: 'member',
-                  monthly_contribution: 3000,
-                  is_active: true,
-                }])
-                .select()
-                .single();
-
-              if (newDbMember) {
-                fetchedMembers.push({
-                  id: newDbMember.id,
-                  mess_id: newDbMember.mess_id,
-                  display_name: newDbMember.display_name,
-                  role: newDbMember.role || 'member',
-                  monthly_contribution: Number(newDbMember.monthly_contribution || 3000),
-                  is_active: true,
-                  joined_at: newDbMember.joined_at || newDbMember.created_at,
-                  created_at: newDbMember.created_at,
-                  updated_at: newDbMember.updated_at,
-                  user_id: newDbMember.user_id,
-                });
-              } else {
-                fetchedMembers.push({
-                  id: `mem-${user.id.substring(0, 8)}`,
-                  mess_id: targetMessId,
-                  display_name: userDisplayName,
-                  role: 'member',
-                  monthly_contribution: 3000,
-                  is_active: true,
-                  joined_at: new Date().toISOString(),
-                  created_at: new Date().toISOString(),
-                  updated_at: new Date().toISOString(),
-                  user_id: user.id,
-                });
-              }
-            } catch (e) {
-              fetchedMembers.push({
-                id: `mem-${user.id.substring(0, 8)}`,
-                mess_id: messGroup.id || 'mess-apna-001',
-                display_name: userDisplayName,
-                role: 'member',
-                monthly_contribution: 3000,
-                is_active: true,
-                joined_at: new Date().toISOString(),
-                created_at: new Date().toISOString(),
-                updated_at: new Date().toISOString(),
-                user_id: user.id,
-              });
-            }
+        // Ensure all default household test members exist in fetchedMembers
+        MOCK_MEMBERS.forEach((mockM) => {
+          if (!fetchedMembers.some((fm) => fm.display_name.toLowerCase() === mockM.display_name.toLowerCase())) {
+            fetchedMembers.push(mockM);
           }
-        }
+        });
 
         setMembers(fetchedMembers);
 
@@ -240,10 +180,20 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
           setSelectedMonthId(dbMonths[0].id);
         }
 
+        // Load local cache persistence for shared contributions
+        let cachedContribs: Contribution[] = [];
+        try {
+          const raw = localStorage.getItem('apnamess_shared_contributions');
+          if (raw) cachedContribs = JSON.parse(raw);
+        } catch (e) {}
+
         const { data: dbContribs } = await supabase.from('contributions').select('*');
+        let loadedContribs: Contribution[] = [];
+
         if (dbContribs && dbContribs.length > 0) {
-          setContributions(
-            dbContribs.map((c: any) => ({
+          loadedContribs = dbContribs.map((c: any) => {
+            const payer = fetchedMembers.find((m) => m.id === c.member_id);
+            return {
               id: c.id,
               mess_id: c.mess_id,
               month_id: c.month_id,
@@ -253,14 +203,34 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
               payment_method: c.payment_method,
               note: c.note,
               created_at: c.created_at,
-            }))
-          );
+              member_name: payer?.display_name || c.member_name || 'Member',
+            };
+          });
         }
 
+        // Merge DB contribs & cached contribs
+        cachedContribs.forEach((cc) => {
+          if (!loadedContribs.some((lc) => lc.id === cc.id)) {
+            loadedContribs.push(cc);
+          }
+        });
+
+        setContributions(loadedContribs);
+
+        // Load local cache persistence for shared expenses
+        let cachedExpenses: Expense[] = [];
+        try {
+          const raw = localStorage.getItem('apnamess_shared_expenses');
+          if (raw) cachedExpenses = JSON.parse(raw);
+        } catch (e) {}
+
         const { data: dbExpenses } = await supabase.from('expenses').select('*');
+        let loadedExpenses: Expense[] = [];
+
         if (dbExpenses && dbExpenses.length > 0) {
-          setExpenses(
-            dbExpenses.map((e: any) => ({
+          loadedExpenses = dbExpenses.map((e: any) => {
+            const payer = fetchedMembers.find((m) => m.id === e.paid_by_member_id);
+            return {
               id: e.id,
               mess_id: e.mess_id,
               month_id: e.month_id,
@@ -270,9 +240,18 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
               paid_by_member_id: e.paid_by_member_id,
               payment_source: e.payment_source || 'common_fund',
               created_at: e.created_at,
-            }))
-          );
+              member_name: payer?.display_name || e.member_name || 'Member',
+            };
+          });
         }
+
+        cachedExpenses.forEach((ce) => {
+          if (!loadedExpenses.some((le) => le.id === ce.id)) {
+            loadedExpenses.push(ce);
+          }
+        });
+
+        setExpenses(loadedExpenses);
       } catch (err) {
         // Fallback gracefully
       }
@@ -352,7 +331,13 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       member_name: payer?.display_name || 'Member',
     };
 
-    setExpenses((prev) => [newExpense, ...prev]);
+    setExpenses((prev) => {
+      const updated = [newExpense, ...prev];
+      try {
+        localStorage.setItem('apnamess_shared_expenses', JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
 
     try {
       await supabase.from('expenses').insert([{
@@ -376,7 +361,13 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     const existing = expenses.find((e) => e.id === id);
     if (!existing) return;
 
-    setExpenses((prev) => prev.filter((e) => e.id !== id));
+    setExpenses((prev) => {
+      const updated = prev.filter((e) => e.id !== id);
+      try {
+        localStorage.setItem('apnamess_shared_expenses', JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
 
     try {
       await supabase.from('expenses').delete().eq('id', id);
@@ -404,7 +395,13 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       member_name: payer?.display_name || 'Member',
     };
 
-    setContributions((prev) => [newContrib, ...prev]);
+    setContributions((prev) => {
+      const updated = [newContrib, ...prev];
+      try {
+        localStorage.setItem('apnamess_shared_contributions', JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
 
     try {
       await supabase.from('contributions').insert([{

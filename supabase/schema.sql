@@ -212,35 +212,36 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 CREATE POLICY "Public profiles are viewable by authenticated users" ON public.profiles FOR SELECT USING (auth.role() = 'authenticated');
 CREATE POLICY "Users can update own profile" ON public.profiles FOR UPDATE USING (auth.uid() = id);
 
--- Mess Groups: Members can view their mess group, Admins can update
-CREATE POLICY "Members can view mess group" ON public.mess_groups FOR SELECT USING (public.is_mess_member(id));
-CREATE POLICY "Admins can update mess group" ON public.mess_groups FOR UPDATE USING (public.is_mess_admin(id));
+-- Mess Groups: Authenticated users can view and insert mess groups
+CREATE POLICY "Authenticated users can view mess group" ON public.mess_groups FOR SELECT USING (auth.role() = 'authenticated');
+CREATE POLICY "Authenticated users can insert mess group" ON public.mess_groups FOR INSERT WITH CHECK (auth.role() = 'authenticated');
+CREATE POLICY "Authenticated users can update mess group" ON public.mess_groups FOR UPDATE USING (auth.role() = 'authenticated');
 
--- Mess Members: Members can view all members in their mess group, Admins can insert/update
-CREATE POLICY "Members can view mess members" ON public.mess_members FOR SELECT USING (public.is_mess_member(mess_id));
-CREATE POLICY "Admins can insert mess members" ON public.mess_members FOR INSERT WITH CHECK (public.is_mess_admin(mess_id));
-CREATE POLICY "Admins can update mess members" ON public.mess_members FOR UPDATE USING (public.is_mess_admin(mess_id));
+-- Mess Members: Authenticated users can view, insert, and update mess members
+CREATE POLICY "Authenticated users can view mess members" ON public.mess_members FOR SELECT USING (auth.role() = 'authenticated');
+CREATE POLICY "Authenticated users can insert mess members" ON public.mess_members FOR INSERT WITH CHECK (auth.role() = 'authenticated');
+CREATE POLICY "Authenticated users can update mess members" ON public.mess_members FOR UPDATE USING (auth.role() = 'authenticated');
 
 -- Data Access Policies (Months, Categories, Expenses, Contributions, Settlements, Adjustments, Recurring, Logs)
--- Select allowed for members of mess
-CREATE POLICY "Members can view months" ON public.months FOR SELECT USING (public.is_mess_member(mess_id));
-CREATE POLICY "Members can view categories" ON public.categories FOR SELECT USING (mess_id IS NULL OR public.is_mess_member(mess_id));
-CREATE POLICY "Members can view contributions" ON public.contributions FOR SELECT USING (public.is_mess_member(mess_id));
-CREATE POLICY "Members can view expenses" ON public.expenses FOR SELECT USING (public.is_mess_member(mess_id));
-CREATE POLICY "Members can view settlements" ON public.settlements FOR SELECT USING (public.is_mess_member(mess_id));
-CREATE POLICY "Members can view cash_adjustments" ON public.cash_adjustments FOR SELECT USING (public.is_mess_member(mess_id));
-CREATE POLICY "Members can view recurring_expenses" ON public.recurring_expenses FOR SELECT USING (public.is_mess_member(mess_id));
-CREATE POLICY "Members can view activity_logs" ON public.activity_logs FOR SELECT USING (public.is_mess_member(mess_id));
+CREATE POLICY "Authenticated users can view months" ON public.months FOR SELECT USING (auth.role() = 'authenticated');
+CREATE POLICY "Authenticated users can insert months" ON public.months FOR INSERT WITH CHECK (auth.role() = 'authenticated');
 
--- Insert/Update allowed for members
-CREATE POLICY "Members can insert contributions" ON public.contributions FOR INSERT WITH CHECK (public.is_mess_member(mess_id));
-CREATE POLICY "Members can insert expenses" ON public.expenses FOR INSERT WITH CHECK (public.is_mess_member(mess_id));
-CREATE POLICY "Members can insert settlements" ON public.settlements FOR INSERT WITH CHECK (public.is_mess_member(mess_id));
+CREATE POLICY "Authenticated users can view categories" ON public.categories FOR SELECT USING (auth.role() = 'authenticated');
 
--- Admins can manage/edit/delete all financial entries
-CREATE POLICY "Admins can delete expenses" ON public.expenses FOR DELETE USING (public.is_mess_admin(mess_id));
-CREATE POLICY "Admins can delete contributions" ON public.contributions FOR DELETE USING (public.is_mess_admin(mess_id));
-CREATE POLICY "Admins can manage months" ON public.months FOR ALL USING (public.is_mess_admin(mess_id));
+CREATE POLICY "Authenticated users can view contributions" ON public.contributions FOR SELECT USING (auth.role() = 'authenticated');
+CREATE POLICY "Authenticated users can insert contributions" ON public.contributions FOR INSERT WITH CHECK (auth.role() = 'authenticated');
+CREATE POLICY "Authenticated users can delete contributions" ON public.contributions FOR DELETE USING (auth.role() = 'authenticated');
+
+CREATE POLICY "Authenticated users can view expenses" ON public.expenses FOR SELECT USING (auth.role() = 'authenticated');
+CREATE POLICY "Authenticated users can insert expenses" ON public.expenses FOR INSERT WITH CHECK (auth.role() = 'authenticated');
+CREATE POLICY "Authenticated users can delete expenses" ON public.expenses FOR DELETE USING (auth.role() = 'authenticated');
+
+CREATE POLICY "Authenticated users can view settlements" ON public.settlements FOR SELECT USING (auth.role() = 'authenticated');
+CREATE POLICY "Authenticated users can insert settlements" ON public.settlements FOR INSERT WITH CHECK (auth.role() = 'authenticated');
+
+CREATE POLICY "Authenticated users can view cash_adjustments" ON public.cash_adjustments FOR SELECT USING (auth.role() = 'authenticated');
+CREATE POLICY "Authenticated users can view recurring_expenses" ON public.recurring_expenses FOR SELECT USING (auth.role() = 'authenticated');
+CREATE POLICY "Authenticated users can view activity_logs" ON public.activity_logs FOR SELECT USING (auth.role() = 'authenticated');
 
 -- Trigger to create profile automatically on auth signup
 CREATE OR REPLACE FUNCTION public.handle_new_user()

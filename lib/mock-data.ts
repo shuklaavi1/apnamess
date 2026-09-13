@@ -11,8 +11,10 @@ import {
   ActivityLog,
 } from './types';
 
+export const SHARED_MESS_ID = '00000000-0000-0000-0000-000000000001';
+
 export const MOCK_MESS_GROUP: MessGroup = {
-  id: 'mess-apna-001',
+  id: SHARED_MESS_ID,
   name: 'ApnaMess',
   currency: 'INR',
   timezone: 'Asia/Kolkata',
@@ -22,12 +24,21 @@ export const MOCK_MESS_GROUP: MessGroup = {
   updated_at: new Date().toISOString(),
 };
 
-export const MOCK_MEMBERS: MessMember[] = [];
+export const MOCK_MEMBERS: MessMember[] = [
+  { id: 'mem-avi', mess_id: SHARED_MESS_ID, display_name: 'Avi', role: 'admin', monthly_contribution: 3000, is_active: true, joined_at: new Date().toISOString(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  { id: 'mem-sanjeev', mess_id: SHARED_MESS_ID, display_name: 'Sanjeev', role: 'member', monthly_contribution: 3000, is_active: true, joined_at: new Date().toISOString(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  { id: 'mem-tapas', mess_id: SHARED_MESS_ID, display_name: 'Tapas', role: 'member', monthly_contribution: 3000, is_active: true, joined_at: new Date().toISOString(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  { id: 'mem-om', mess_id: SHARED_MESS_ID, display_name: 'Om', role: 'member', monthly_contribution: 3000, is_active: true, joined_at: new Date().toISOString(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  { id: 'mem-rahul', mess_id: SHARED_MESS_ID, display_name: 'Rahul', role: 'member', monthly_contribution: 3000, is_active: true, joined_at: new Date().toISOString(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  { id: 'mem-abhay', mess_id: SHARED_MESS_ID, display_name: 'Abhay', role: 'member', monthly_contribution: 3000, is_active: true, joined_at: new Date().toISOString(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  { id: 'mem-manish', mess_id: SHARED_MESS_ID, display_name: 'Manish', role: 'member', monthly_contribution: 3000, is_active: true, joined_at: new Date().toISOString(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  { id: 'mem-shahzada', mess_id: SHARED_MESS_ID, display_name: 'Shahzada', role: 'member', monthly_contribution: 3000, is_active: true, joined_at: new Date().toISOString(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+];
 
 export const MOCK_MONTHS: AccountingMonth[] = [
   {
     id: 'month-2026-09',
-    mess_id: 'mess-apna-001',
+    mess_id: SHARED_MESS_ID,
     year: 2026,
     month_number: 9,
     name: 'September',
