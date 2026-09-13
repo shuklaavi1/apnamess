@@ -122,7 +122,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       let group = dbGroups && dbGroups.length > 0 ? dbGroups[0] : null;
 
       if (!group) {
-        const { data: newGroup, error: createErr } = await supabase
+        const { data: newGroups } = await supabase
           .from('mess_groups')
           .insert([
             {
@@ -133,13 +133,12 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
               low_balance_threshold: 1000,
             },
           ])
-          .select('*')
-          .single();
+          .select('*');
 
-        if (newGroup) {
-          group = newGroup;
+        if (newGroups && newGroups.length > 0) {
+          group = newGroups[0];
         } else {
-          // Fallback refetch if select single failed
+          // Fallback refetch
           const { data: retryGroups } = await supabase.from('mess_groups').select('*').order('created_at', { ascending: true });
           group = retryGroups && retryGroups.length > 0 ? retryGroups[0] : null;
         }
@@ -235,7 +234,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
             await supabase.from('mess_members').update({ user_id: user.id }).eq('id', matchByName.id);
             matchByName.user_id = user.id;
           } else {
-            const { data: newMem } = await supabase
+            const { data: newMems } = await supabase
               .from('mess_members')
               .insert([
                 {
@@ -247,10 +246,10 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
                   is_active: true,
                 },
               ])
-              .select('*')
-              .single();
-            if (newMem) {
-              dbMembers.push(newMem);
+              .select('*');
+
+            if (newMems && newMems.length > 0) {
+              dbMembers.push(newMems[0]);
             }
           }
         }
@@ -419,10 +418,20 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
 
     const { data: dbGroups } = await supabase.from('mess_groups').select('*').order('created_at', { ascending: true });
     if (dbGroups && dbGroups.length > 0) {
+      setMessGroup({
+        id: dbGroups[0].id,
+        name: dbGroups[0].name || 'ApnaMess',
+        currency: dbGroups[0].currency || 'INR',
+        timezone: dbGroups[0].timezone || 'Asia/Kolkata',
+        default_monthly_contribution: Number(dbGroups[0].default_monthly_contribution || 3000),
+        low_balance_threshold: Number(dbGroups[0].low_balance_threshold || 1000),
+        created_at: dbGroups[0].created_at,
+        updated_at: dbGroups[0].updated_at,
+      });
       return dbGroups[0].id;
     }
 
-    const { data: newGroup } = await supabase
+    const { data: insertedGroups } = await supabase
       .from('mess_groups')
       .insert([
         {
@@ -433,17 +442,41 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
           low_balance_threshold: 1000,
         },
       ])
-      .select('*')
-      .single();
+      .select('*');
 
-    return newGroup ? newGroup.id : null;
+    if (insertedGroups && insertedGroups.length > 0) {
+      setMessGroup({
+        id: insertedGroups[0].id,
+        name: insertedGroups[0].name || 'ApnaMess',
+        currency: insertedGroups[0].currency || 'INR',
+        timezone: insertedGroups[0].timezone || 'Asia/Kolkata',
+        default_monthly_contribution: Number(insertedGroups[0].default_monthly_contribution || 3000),
+        low_balance_threshold: Number(insertedGroups[0].low_balance_threshold || 1000),
+        created_at: insertedGroups[0].created_at,
+        updated_at: insertedGroups[0].updated_at,
+      });
+      return insertedGroups[0].id;
+    }
+
+    const { data: refetched } = await supabase.from('mess_groups').select('*').order('created_at', { ascending: true });
+    if (refetched && refetched.length > 0) {
+      return refetched[0].id;
+    }
+
+    return null;
   };
 
   const addExpense = async (data: Omit<Expense, 'id' | 'created_at' | 'mess_id' | 'month_id'> & { month_id?: string }) => {
+    if (!user) {
+      showToast('Please sign in to save expenses', 'error');
+      router.push('/login');
+      return;
+    }
+
     const targetMessId = await resolveMessId();
 
     if (!targetMessId) {
-      showToast('Mess group not initialized', 'error');
+      showToast('Unable to connect to ApnaMess backend. Please check your connection.', 'error');
       return;
     }
 
@@ -497,10 +530,16 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   };
 
   const addContribution = async (data: Omit<Contribution, 'id' | 'created_at' | 'mess_id' | 'month_id'> & { month_id?: string }) => {
+    if (!user) {
+      showToast('Please sign in to add contributions', 'error');
+      router.push('/login');
+      return;
+    }
+
     const targetMessId = await resolveMessId();
 
     if (!targetMessId) {
-      showToast('Mess group not initialized', 'error');
+      showToast('Unable to connect to ApnaMess backend. Please check your connection.', 'error');
       return;
     }
 
@@ -510,7 +549,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       if (dbMonths && dbMonths.length > 0) {
         targetMonthId = dbMonths[0].id;
       } else {
-        const { data: newMonth } = await supabase.from('months').insert([
+        const { data: newMonths } = await supabase.from('months').insert([
           {
             mess_id: targetMessId,
             year: 2026,
@@ -520,9 +559,16 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
             opening_balance: 0,
             status: 'open',
           },
-        ]).select('*').single();
-        if (newMonth) targetMonthId = newMonth.id;
+        ]).select('*');
+        if (newMonths && newMonths.length > 0) {
+          targetMonthId = newMonths[0].id;
+        }
       }
+    }
+
+    if (!targetMonthId) {
+      showToast('Failed to resolve active month.', 'error');
+      return;
     }
 
     const payer = members.find((m) => m.id === data.member_id);
@@ -566,10 +612,16 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   };
 
   const addMember = async (displayName: string, role: MemberRole = 'member', monthlyContribution = 3000) => {
+    if (!user) {
+      showToast('Please sign in to add members', 'error');
+      router.push('/login');
+      return;
+    }
+
     const targetMessId = await resolveMessId();
 
     if (!targetMessId) {
-      showToast('Mess group not initialized', 'error');
+      showToast('Unable to connect to ApnaMess backend. Please check your connection.', 'error');
       return;
     }
 
