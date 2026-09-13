@@ -10,7 +10,7 @@ interface AddOtherMoneyModalProps {
 }
 
 export function AddOtherMoneyModal({ isOpen, onClose }: AddOtherMoneyModalProps) {
-  const { addContribution, addExpense, currentMember, selectedMonth, isInitializing, messGroup } = useData();
+  const { addContribution, addExpense, currentMember, selectedMonth, isInitializing } = useData();
 
   const [type, setType] = useState<'add' | 'deduct'>('add');
   const [amount, setAmount] = useState('');
@@ -19,7 +19,7 @@ export function AddOtherMoneyModal({ isOpen, onClose }: AddOtherMoneyModalProps)
 
   if (!isOpen) return null;
 
-  const isFormLoading = isInitializing || !messGroup?.id || messGroup.id === 'placeholder';
+  const isFormLoading = isInitializing;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

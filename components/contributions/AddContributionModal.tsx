@@ -10,7 +10,7 @@ interface AddContributionModalProps {
 }
 
 export function AddContributionModal({ isOpen, onClose }: AddContributionModalProps) {
-  const { members, currentMember, addContribution, selectedMonth, isInitializing, messGroup } = useData();
+  const { members, currentMember, addContribution, selectedMonth, isInitializing } = useData();
 
   const [amount, setAmount] = useState('');
   const [memberId, setMemberId] = useState('');
@@ -27,7 +27,7 @@ export function AddContributionModal({ isOpen, onClose }: AddContributionModalPr
 
   if (!isOpen) return null;
 
-  const isFormLoading = isInitializing || !messGroup?.id || messGroup.id === 'placeholder';
+  const isFormLoading = isInitializing;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

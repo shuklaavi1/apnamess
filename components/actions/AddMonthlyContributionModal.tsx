@@ -10,7 +10,7 @@ interface AddMonthlyContributionModalProps {
 }
 
 export function AddMonthlyContributionModal({ isOpen, onClose }: AddMonthlyContributionModalProps) {
-  const { members, currentMember, addContribution, months, selectedMonth, isInitializing, messGroup } = useData();
+  const { members, currentMember, addContribution, months, selectedMonth, isInitializing } = useData();
 
   const [memberId, setMemberId] = useState('');
   const [amount, setAmount] = useState('3000');
@@ -30,7 +30,7 @@ export function AddMonthlyContributionModal({ isOpen, onClose }: AddMonthlyContr
 
   if (!isOpen) return null;
 
-  const isFormLoading = isInitializing || !messGroup?.id || messGroup.id === 'placeholder';
+  const isFormLoading = isInitializing;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
