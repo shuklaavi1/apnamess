@@ -258,6 +258,34 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     }
 
     loadLiveBackendData();
+
+    // 1. Listen for storage events across tabs/windows for instant sync
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'apnamess_shared_contributions' || e.key === 'apnamess_shared_expenses') {
+        loadLiveBackendData();
+      }
+    };
+
+    // 2. Refresh live data on window focus and visibility change
+    const handleFocus = () => {
+      loadLiveBackendData();
+    };
+
+    // 3. Periodic polling every 3 seconds for active sync
+    const interval = setInterval(() => {
+      loadLiveBackendData();
+    }, 3000);
+
+    window.addEventListener('storage', handleStorageChange);
+    window.addEventListener('focus', handleFocus);
+    window.addEventListener('visibilitychange', handleFocus);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('visibilitychange', handleFocus);
+    };
   }, [user]);
 
   // Sync currentMemberId when user or members change
